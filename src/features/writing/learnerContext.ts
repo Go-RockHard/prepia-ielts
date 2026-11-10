@@ -24,6 +24,7 @@ export type WritiaLearnerAssignment = {
   taskType: 'task1' | 'task2'
   focus: string
   assignedFor: string
+  durationMinutes?: number
 }
 
 export type WritiaLearnerContext = {
@@ -43,6 +44,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
 
+function isLearnerCriterion(value: unknown): value is WritiaLearnerCriterion {
+  return isRecord(value)
+    && typeof value.label === 'string'
+    && typeof value.band === 'number'
+    && typeof value.evidence === 'string'
+    && typeof value.nextStep === 'string'
+}
+
 function parseAssessment(value: unknown): WritiaLearnerAssessment | null {
   if (!isRecord(value)
     || typeof value.id !== 'string'
@@ -54,11 +63,7 @@ function parseAssessment(value: unknown): WritiaLearnerAssessment | null {
     || typeof value.priority !== 'string'
     || typeof value.wordCount !== 'number'
     || !Array.isArray(value.criteria)) return null
-  const criteria = value.criteria.filter((criterion): criterion is Record<string, unknown> => isRecord(criterion)
-    && typeof criterion.label === 'string'
-    && typeof criterion.band === 'number'
-    && typeof criterion.evidence === 'string'
-    && typeof criterion.nextStep === 'string')
+  const criteria = value.criteria.filter(isLearnerCriterion)
   return {
     id: value.id,
     taskLabel: value.taskLabel,
@@ -68,7 +73,7 @@ function parseAssessment(value: unknown): WritiaLearnerAssessment | null {
     priority: value.priority,
     mode: value.mode === 'exam' || value.mode === 'guided' ? value.mode : undefined,
     wordCount: value.wordCount,
-    criteria: criteria.map(({ label, band, evidence, nextStep }) => ({ label, band, evidence, nextStep })),
+    criteria,
   }
 }
 
@@ -87,6 +92,9 @@ function parseAssignment(value: unknown): WritiaLearnerAssignment | null {
     taskType: value.taskType,
     focus: value.focus,
     assignedFor: value.assignedFor,
+    ...(typeof value.durationMinutes === 'number' && Number.isFinite(value.durationMinutes) && value.durationMinutes > 0
+      ? { durationMinutes: value.durationMinutes }
+      : {}),
   }
 }
 

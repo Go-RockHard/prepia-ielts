@@ -81,7 +81,7 @@ export function WritiaNotificationCenter({
       items.push({
         id: `assignment-${assignment.id}`,
         title: `Continue: ${assignment.title}`,
-        detail: `${assignment.taskType === 'task1' ? 'Task 1' : 'Task 2'} · ${assignment.durationMinutes} min · ${assignment.focus}`,
+        detail: `${assignment.taskType === 'task1' ? 'Task 1' : 'Task 2'}${assignment.durationMinutes ? ` · ${assignment.durationMinutes} min` : ''} · ${assignment.focus}`,
         label: `Due ${formatDueDate(assignment.assignedFor)}`,
         tone: 'assignment',
         destination: 'assignments',

@@ -120,7 +120,7 @@ export function WritaAdaptiveAssessmentLesson({
     function receiveLessonEvent(event: MessageEvent<unknown>) {
       if (event.source !== iframeRef.current?.contentWindow || typeof event.data !== 'object' || event.data === null || Array.isArray(event.data)) return
       const data = event.data as Record<string, unknown>
-      if (data.type !== 'speakia:interactive-lesson' || data.lessonId !== lesson?.id) return
+      if (!lesson || data.type !== 'speakia:interactive-lesson' || data.lessonId !== lesson.id) return
       const detail = typeof data.detail === 'string' ? data.detail.slice(0, 1600) : ''
       if (!detail || (data.kind !== 'complete' && data.kind !== 'hint' && data.kind !== 'interaction' && data.kind !== 'exercise')) return
       const interaction = data.kind === 'complete'

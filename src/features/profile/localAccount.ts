@@ -6,7 +6,6 @@ const ACCOUNT_STORE = 'accounts'
 const PROFILE_STORE = 'profiles'
 const SESSION_KEY = 'speakia-local-session'
 const REMEMBERED_USERNAME_KEY = 'prodia-remembered-username'
-const REQUIRED_LOCAL_PASSWORD = 'letsspeakia'
 
 export interface UserProfile {
   username: string
@@ -108,9 +107,7 @@ export async function createLocalAccount(usernameInput: string, password: string
   if (!/^[a-z0-9._-]{3,32}$/.test(username)) {
     throw new Error('Username must be 3–32 characters using letters, numbers, dots, underscores, or hyphens.')
   }
-  if (password !== REQUIRED_LOCAL_PASSWORD) {
-    throw new Error('For this local prototype, use the provided password: letsspeakia')
-  }
+  if (!password) throw new Error('Choose a password for your local account.')
   if (await readAccount(username)) throw new Error('That username already has a local account. Sign in instead.')
 
   const salt = crypto.getRandomValues(new Uint8Array(16))

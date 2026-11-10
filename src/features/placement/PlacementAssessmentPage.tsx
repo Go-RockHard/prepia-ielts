@@ -75,13 +75,14 @@ function parseWritingPlacement(text: string): Omit<PlacementAssessment, 'id' | '
     throw new Error('Writia returned an invalid placement assessment. Please submit again.')
   }
   const record = parsed as Record<string, unknown>
+  const rawCriteria = record.criteria
   if (typeof record.overallBand !== 'number' || !Number.isFinite(record.overallBand) || record.overallBand < 0 || record.overallBand > 9
     || typeof record.summary !== 'string' || typeof record.priority !== 'string'
-    || !Array.isArray(record.criteria)) {
+    || !Array.isArray(rawCriteria)) {
     throw new Error('Writia could not validate the placement results. Please submit again.')
   }
   const criteria: PlacementCriterion[] = writingCriteria.flatMap((expected) => {
-    const item = record.criteria.find((value) => typeof value === 'object' && value !== null && !Array.isArray(value)
+    const item = rawCriteria.find((value) => typeof value === 'object' && value !== null && !Array.isArray(value)
       && (value as Record<string, unknown>).id === expected.id)
     if (typeof item !== 'object' || item === null || Array.isArray(item)) return []
     const value = item as Record<string, unknown>

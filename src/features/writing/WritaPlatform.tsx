@@ -2475,7 +2475,7 @@ export function WritaPlatform({ apiKey, username, profile, speakingResults, modu
           ] as const).map((tab) => <button id={`writa-bank-tab-${tab.id}`} type="button" role="tab" aria-selected={writingBankTab === tab.id} aria-controls={`writa-bank-panel-${tab.id}`} tabIndex={writingBankTab === tab.id ? 0 : -1} className={writingBankTab === tab.id ? 'learning-library-tab learning-library-tab-active' : 'learning-library-tab'} key={tab.id} onClick={() => { setWritingBankTab(tab.id); setWritingBankSearch('') }} onKeyDown={(event) => moveWritingBankTab(event, tab.id)}>
             <span className={`learning-library-tab-icon ${tab.iconClass}`}><tab.icon size={18} /></span>
             <span className="learning-library-tab-copy"><strong>{tab.label}</strong><small>{tab.detail}</small></span>
-            {tab.count !== undefined ? <span className="learning-library-tab-count">{tab.count}</span> : <span className="learning-library-tab-arrow"><ArrowRight size={15} /></span>}
+            {'count' in tab ? <span className="learning-library-tab-count">{tab.count}</span> : <span className="learning-library-tab-arrow"><ArrowRight size={15} /></span>}
           </button>)}
         </div>
         <div id="writa-bank-panel-topics" role="tabpanel" aria-labelledby="writa-bank-tab-topics" hidden={writingBankTab !== 'topics'}>
