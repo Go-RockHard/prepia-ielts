@@ -1,4 +1,5 @@
-import { GoogleGenAI, Type, type FunctionDeclaration } from '@google/genai'
+import { Type, type FunctionDeclaration } from '@google/genai'
+import { GoogleGenAI } from '@/lib/geminiClient'
 
 export const AUDIO_LESSON_TTS_MODEL = 'gemini-3.8-flash-lite-tts'
 export const AUDIO_LESSON_VOICE = 'Fola'
@@ -43,7 +44,7 @@ function decodeBase64(value: string): Uint8Array {
 
 function toWav(chunks: Uint8Array[], mimeType: string): Blob {
   const dataLength = chunks.reduce((total, chunk) => total + chunk.byteLength, 0)
-  if (!dataLength) throw new Error('Gemini returned no audio for this lesson. Please try again.')
+  if (!dataLength) throw new Error('Speakia AI returned no audio for this lesson. Please try again.')
   if (/audio\/(?:x-)?wav/i.test(mimeType)) {
     const data = new Uint8Array(dataLength)
     let offset = 0
@@ -58,7 +59,7 @@ function toWav(chunks: Uint8Array[], mimeType: string): Blob {
   const bitsPerSample = Number(mimeType.match(/audio\/L(\d+)/i)?.[1]) || 16
   const channels = Number(mimeType.match(/channels=(\d+)/i)?.[1]) || 1
   if (![8, 16, 24, 32].includes(bitsPerSample) || channels < 1 || channels > 2) {
-    throw new Error('Gemini returned audio in an unsupported format. Please try again.')
+    throw new Error('Speakia AI returned audio in an unsupported format. Please try again.')
   }
   const header = new ArrayBuffer(44)
   const view = new DataView(header)
@@ -94,15 +95,26 @@ export async function createAudioLesson(
   learnerContext: unknown,
   model: string,
   language: string,
+  abortSignal?: AbortSignal,
+  lessonType: 'speaking' | 'writing' = 'speaking',
 ): Promise<{ lesson: AudioLesson; audio: Blob }> {
-  if (!apiKey.trim()) throw new Error('Add your Gemini API key in Settings to create an audio lesson.')
+  if (!apiKey.trim()) throw new Error('Add your Speakia AI API key in Settings to create an audio lesson.')
   if (!isRecord(rawArgs)) throw new Error('The audio lesson request was incomplete. Please try again.')
   const request = typeof rawArgs.request === 'string' ? rawArgs.request.trim().slice(0, 800) : ''
   if (request.length < 3) throw new Error('Tell Speakia what you want to learn in the audio lesson.')
-  const topic = typeof rawArgs.topic === 'string' && rawArgs.topic.trim() ? rawArgs.topic.trim().slice(0, 120) : 'IELTS Speaking'
-  const focus = typeof rawArgs.focus === 'string' && rawArgs.focus.trim() ? rawArgs.focus.trim().slice(0, 160) : 'speaking test preparation'
+  const skillName = lessonType === 'writing' ? 'Writing' : 'Speaking'
+  const topic = typeof rawArgs.topic === 'string' && rawArgs.topic.trim() ? rawArgs.topic.trim().slice(0, 120) : `IELTS ${skillName}`
+  const focus = typeof rawArgs.focus === 'string' && rawArgs.focus.trim() ? rawArgs.focus.trim().slice(0, 160) : `${skillName.toLocaleLowerCase()} test preparation`
   const part = rawArgs.part === 'part1' || rawArgs.part === 'part2' || rawArgs.part === 'part3' ? rawArgs.part : 'choose the most relevant part'
   const level = typeof rawArgs.level === 'string' && rawArgs.level.trim() ? rawArgs.level.trim().slice(0, 100) : 'adapt to the learner context'
+  const normalizedLanguage = language.toLocaleLowerCase()
+  const languageVariantInstruction = normalizedLanguage.includes('urdu')
+    ? 'For Urdu, use natural Pakistani Urdu vocabulary, idiom, and pronunciation in Urdu Perso-Arabic script; do not use Hindi vocabulary or Devanagari.'
+    : normalizedLanguage.includes('punjabi')
+      ? 'For Punjabi, use natural Pakistani Punjabi vocabulary and pronunciation in Shahmukhi script; do not use Indian Punjabi vocabulary or Gurmukhi.'
+      : normalizedLanguage.includes('code switching')
+        ? 'For Urdu and Punjabi within code-switching, use Pakistani Urdu and Pakistani Punjabi varieties, Urdu Perso-Arabic script for Urdu, and Shahmukhi for Punjabi; do not use Hindi, Indian Punjabi, Devanagari, or Gurmukhi.'
+        : ''
   const client = new GoogleGenAI({ apiKey: apiKey.trim() })
   const scriptResponse = await client.models.generateContent({
     model,
@@ -112,17 +124,18 @@ export async function createAudioLesson(
     }],
     config: {
       responseMimeType: 'application/json',
-      systemInstruction: `Write a concise, natural spoken IELTS Speaking audio lesson in ${language}. Teach one clear skill with an opening, accurate explanation, realistic spoken examples, a short listen-and-repeat or speaking prompt, and a brief takeaway. Keep it friendly, useful, and self-contained; avoid stage directions, markdown, scoring guarantees, and references to audio production. Target 250–450 spoken words. Return only JSON: {"title": string, "summary": string, "transcript": string}.`,
+      abortSignal,
+      systemInstruction: `Write a concise, natural spoken IELTS ${skillName} audio lesson in ${language}. ${languageVariantInstruction} Teach one clear skill with an opening, accurate explanation, realistic examples, a short retrieval or practice prompt, and a brief takeaway. ${lessonType === 'writing' ? 'Focus on task analysis, idea development, paragraph organization, cohesion, precise vocabulary, grammar editing, or a writing strategy. Give short examples that a learner can apply to their own writing; do not write a full essay.' : 'Use realistic spoken examples and a short listen-and-repeat or speaking prompt.'} Keep it friendly, useful, and self-contained; avoid stage directions, markdown, scoring guarantees, and references to audio production. Target 250–450 spoken words. Return only JSON: {"title": string, "summary": string, "transcript": string}.`,
     },
   })
   const scriptText = scriptResponse.text?.trim()
-  if (!scriptText) throw new Error('Gemini returned an empty audio lesson script. Please try again.')
+  if (!scriptText) throw new Error('Speakia AI returned an empty audio lesson script. Please try again.')
 
   let decoded: unknown
   try {
     decoded = JSON.parse(scriptText)
   } catch (error) {
-    console.error('Gemini returned invalid JSON for a Speakia audio lesson.', error)
+    console.error('Speakia AI returned invalid JSON for a Speakia audio lesson.', error)
     throw new Error('Speakia could not read the audio lesson script. Please try again.')
   }
   if (!isRecord(decoded)
@@ -138,6 +151,7 @@ export async function createAudioLesson(
     contents: [{ role: 'user', parts: [{ text: `## Transcript:\n${decoded.transcript.trim()}` }] }],
     config: {
       temperature: 1,
+      abortSignal,
       responseModalities: ['audio'],
       speechConfig: {
         voiceConfig: { prebuiltVoiceConfig: { voiceName: AUDIO_LESSON_VOICE } },
@@ -155,7 +169,7 @@ export async function createAudioLesson(
     }
   }
   const audio = toWav(audioChunks, audioMimeType)
-  if (!audio.size) throw new Error('Gemini returned an empty audio lesson. Please try again.')
+  if (!audio.size) throw new Error('Speakia AI returned an empty audio lesson. Please try again.')
 
   return {
     audio,

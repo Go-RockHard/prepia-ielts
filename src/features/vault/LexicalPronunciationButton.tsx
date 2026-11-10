@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { LoaderCircle, Volume2 } from 'lucide-react'
+import { reportGeminiQuota } from '@/lib/geminiQuota'
 import { loadPronunciationAudio, savePronunciationAudio, synthesizePronunciation } from './pronunciationAudio'
 
-export function LexicalPronunciationButton({ term, apiKey }: { term: string; apiKey: string }) {
+export function LexicalPronunciationButton({ term, example, apiKey }: { term: string; example?: string; apiKey: string }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const audioRef = useRef<HTMLAudioElement>(null)
@@ -24,14 +25,15 @@ export function LexicalPronunciationButton({ term, apiKey }: { term: string; api
 
     setBusy(true)
     try {
-      let blob = await loadPronunciationAudio(term)
+      const cacheKey = `gemini-tts-v2:${term}${example ? `\n${example}` : ''}`
+      let blob = await loadPronunciationAudio(cacheKey)
       if (!blob) {
-        blob = await synthesizePronunciation(apiKey, term)
+        blob = await synthesizePronunciation(apiKey, term, example)
         try {
-          await savePronunciationAudio(term, blob)
+          await savePronunciationAudio(cacheKey, blob)
         } catch (storageError) {
           console.error(`Unable to cache pronunciation audio for "${term}".`, storageError)
-          setError('Audio is ready, but could not be saved locally; the next play may use Gemini again.')
+          setError('Audio is ready, but could not be saved locally; the next play may use Speakia AI again.')
         }
       }
       if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current)
@@ -41,7 +43,9 @@ export function LexicalPronunciationButton({ term, apiKey }: { term: string; api
       await audio.play()
     } catch (caughtError) {
       console.error(`Unable to play the pronunciation for "${term}".`, caughtError)
-      setError(caughtError instanceof Error ? caughtError.message : 'Unable to play this pronunciation. Please try again.')
+      if (!reportGeminiQuota(caughtError)) {
+        setError(caughtError instanceof Error ? caughtError.message : 'Unable to play this pronunciation. Please try again.')
+      }
     } finally {
       setBusy(false)
     }

@@ -1,4 +1,6 @@
-import { GoogleGenAI, Type, type FunctionDeclaration } from '@google/genai'
+import { Type, type FunctionDeclaration } from '@google/genai'
+import { GoogleGenAI } from '@/lib/geminiClient'
+import { getProdiaTextModel } from '@/lib/geminiModels'
 
 export interface LearningModuleItem {
   title: string
@@ -116,10 +118,12 @@ function validateItems(value: unknown, kind: EmbeddedLearningModule['kind']): Le
   })
 }
 
-function makeDocument(kind: EmbeddedLearningModule['kind'], id: string, topic: string, items: LearningModuleItem[]): string {
+function makeDocument(kind: EmbeddedLearningModule['kind'], id: string, topic: string, items: LearningModuleItem[], lessonType: 'speaking' | 'writing'): string {
   const itemJson = JSON.stringify(items).replace(/</g, '\\u003c')
   const safeId = JSON.stringify(id)
   const safeTopic = JSON.stringify(topic)
+  const skillName = lessonType === 'writing' ? 'Writing' : 'Speaking'
+  const skillNameJson = JSON.stringify(skillName)
   const policy = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; img-src data:; connect-src \'none\'; frame-src \'none\'; object-src \'none\'; base-uri \'none\'; form-action \'none\'; navigate-to \'none\'">'
   const bridge = `<script>
 (()=> {
@@ -132,11 +136,11 @@ function makeDocument(kind: EmbeddedLearningModule['kind'], id: string, topic: s
     let content="";
     if(kind==="flashcards"){
       const answer=esc(item.body)+(item.example?"<br><br><em>Example: "+esc(item.example)+"</em>":"");
-      content="<button class='card "+(flipped?"flip":"")+"' aria-label='Flip flashcard'><span class='label'>"+(flipped?"REVEAL":"RECALL")+"</span><strong>"+esc(item.title)+"</strong><p>"+(flipped?answer:"Think of the meaning or a natural IELTS answer before revealing.")+"</p><small>Tap to "+(flipped?"return":"reveal")+" · Space to flip</small></button><div class='controls'><button id='prev'"+previousDisabled+">← Previous</button><button id='flip'>"+(flipped?"Hide answer":"Reveal answer")+"</button><button id='next'"+nextDisabled+">Next →</button></div><div class='recall'><strong>Speaking prompt</strong><p>"+esc(item.prompt||"Use this idea in a natural IELTS Speaking answer.")+"</p></div><button class='done' data-speakia-action='complete'>Finish flashcards</button>";
+      content="<button class='card "+(flipped?"flip":"")+"' aria-label='Flip flashcard'><span class='label'>"+(flipped?"REVEAL":"RECALL")+"</span><strong>"+esc(item.title)+"</strong><p>"+(flipped?answer:"Think of the meaning or a natural IELTS answer before revealing.")+"</p><small>Tap to "+(flipped?"return":"reveal")+" · Space to flip</small></button><div class='controls'><button id='prev'"+previousDisabled+">← Previous</button><button id='flip'>"+(flipped?"Hide answer":"Reveal answer")+"</button><button id='next'"+nextDisabled+">Next →</button></div><div class='recall'><strong>"+${skillNameJson}+" prompt</strong><p>"+esc(item.prompt||"Use this idea in a natural IELTS "+${skillNameJson}+" response.")+"</p></div><button class='done' data-speakia-action='complete'>Finish flashcards</button>";
     } else {
-      content="<article class='slide'><span class='eyebrow'>IELTS SPEAKING · "+String(index+1).padStart(2,"0")+"</span><h1>"+esc(item.title)+"</h1><p>"+esc(item.body)+"</p>"+(item.example?"<blockquote>"+esc(item.example)+"</blockquote>":"")+(item.prompt?"<div class='prompt'><strong>Try it</strong><p>"+esc(item.prompt)+"</p></div>":"")+(notes&&item.answer?"<aside class='notes'><strong>Coach notes</strong><p>"+esc(item.answer)+"</p></aside>":"")+"</article><div class='controls'><button id='prev'"+previousDisabled+">← Previous</button><button id='notes'>"+(notes?"Hide":"Show")+" coach notes</button><button id='next'"+nextDisabled+">Next →</button></div><div class='progress'><span style='width:"+(((index+1)/items.length)*100)+"%'></span></div><button class='done' data-speakia-action='complete'>Finish slide deck</button>";
+      content="<article class='slide'><span class='eyebrow'>IELTS "+${skillNameJson.toLocaleUpperCase()}+" · "+String(index+1).padStart(2,"0")+"</span><h1>"+esc(item.title)+"</h1><p>"+esc(item.body)+"</p>"+(item.example?"<blockquote>"+esc(item.example)+"</blockquote>":"")+(item.prompt?"<div class='prompt'><strong>Try it</strong><p>"+esc(item.prompt)+"</p></div>":"")+(notes&&item.answer?"<aside class='notes'><strong>Coach notes</strong><p>"+esc(item.answer)+"</p></aside>":"")+"</article><div class='controls'><button id='prev'"+previousDisabled+">← Previous</button><button id='notes'>"+(notes?"Hide":"Show")+" coach notes</button><button id='next'"+nextDisabled+">Next →</button></div><div class='progress'><span style='width:"+(((index+1)/items.length)*100)+"%'></span></div><button class='done' data-speakia-action='complete'>Finish slide deck</button>";
     }
-    root.innerHTML="<main class='deck'><div class='top'><span>"+esc(topic)+" · SPEAKING "+(kind==="slides"?"SLIDES":"FLASHCARDS")+"</span><span>"+(index+1)+" / "+items.length+"</span></div>"+content+"</main>";
+    root.innerHTML="<main class='deck'><div class='top'><span>"+esc(topic)+" · "+${skillNameJson.toLocaleUpperCase()}+" "+(kind==="slides"?"SLIDES":"FLASHCARDS")+"</span><span>"+(index+1)+" / "+items.length+"</span></div>"+content+"</main>";
     root.querySelector("#prev").onclick=()=>{index=Math.max(0,index-1);flipped=false;notes=false;render();send("interaction","Viewed item "+(index+1)+": "+items[index].title)};
     root.querySelector("#next").onclick=()=>{index=Math.min(items.length-1,index+1);flipped=false;notes=false;render();send("interaction","Viewed item "+(index+1)+": "+items[index].title)};
     if(kind==="flashcards"){
@@ -160,6 +164,7 @@ function makeDocument(kind: EmbeddedLearningModule['kind'], id: string, topic: s
 export function createLearningModuleFromContent(
   kind: EmbeddedLearningModule['kind'],
   rawArgs: Record<string, unknown>,
+  lessonType: 'speaking' | 'writing' = 'speaking',
 ): EmbeddedLearningModule {
   if (!isRecord(rawArgs)) throw new Error('The learning module content was incomplete. Please try again.')
   const title = typeof rawArgs.title === 'string' ? rawArgs.title.trim() : ''
@@ -177,7 +182,7 @@ export function createLearningModuleFromContent(
     topic,
     summary: summary.slice(0, 500),
     items,
-    html: makeDocument(kind, id, topic, items),
+    html: makeDocument(kind, id, topic, items, lessonType),
     interactions: [],
   }
 }
@@ -187,14 +192,17 @@ export async function createLearningModule(
   kind: EmbeddedLearningModule['kind'],
   rawArgs: Record<string, unknown>,
   learnerContext: unknown,
-  model = 'gemini-2.5-flash',
+  model: string = getProdiaTextModel(),
+  abortSignal?: AbortSignal,
+  lessonType: 'speaking' | 'writing' = 'speaking',
 ): Promise<EmbeddedLearningModule> {
-  if (!apiKey.trim()) throw new Error('Add your Gemini API key in Settings to create this learning module.')
+  if (!apiKey.trim()) throw new Error('Add your Speakia AI API key in Settings to create this learning module.')
   if (!isRecord(rawArgs)) throw new Error('The learning module request was incomplete. Please try again.')
   const request = typeof rawArgs.request === 'string' ? rawArgs.request.trim().slice(0, 800) : ''
   if (request.length < 3) throw new Error('Tell Speakia what you want to study.')
-  const topic = typeof rawArgs.topic === 'string' && rawArgs.topic.trim() ? rawArgs.topic.trim().slice(0, 120) : 'IELTS Speaking'
-  const focus = typeof rawArgs.focus === 'string' && rawArgs.focus.trim() ? rawArgs.focus.trim().slice(0, 160) : 'speaking test preparation'
+  const skillName = lessonType === 'writing' ? 'Writing' : 'Speaking'
+  const topic = typeof rawArgs.topic === 'string' && rawArgs.topic.trim() ? rawArgs.topic.trim().slice(0, 120) : `IELTS ${skillName}`
+  const focus = typeof rawArgs.focus === 'string' && rawArgs.focus.trim() ? rawArgs.focus.trim().slice(0, 160) : `${skillName.toLocaleLowerCase()} test preparation`
   const level = typeof rawArgs.level === 'string' && rawArgs.level.trim() ? rawArgs.level.trim().slice(0, 100) : 'adapt to the supplied learner profile'
   const client = new GoogleGenAI({ apiKey: apiKey.trim() })
   const isFlashcards = kind === 'flashcards'
@@ -206,20 +214,21 @@ export async function createLearningModule(
     }],
     config: {
       responseMimeType: 'application/json',
+      abortSignal,
       systemInstruction: isFlashcards
-        ? 'Design a personalized IELTS Speaking flashcard set. Include accurate, useful content with active recall, realistic examples and speaking prompts. Adapt to the supplied learner and request. Return only JSON with title (string), summary (string), items (4–16 objects). Each item has title (term/question), body (meaning/model answer/key explanation), and optional example (string), prompt (string), answer (string).'
-        : 'Design a personalized visual mini slide deck for IELTS Speaking. Teach progressively with concise, accurate content, worked examples, and learner practice. Adapt to the supplied learner and request. Return only JSON with title (string), summary (string), items (4–12 objects). Each item has title (string), body (string), and optional example (string), prompt (string), answer (string, a useful coach note).',
+        ? `Design a personalized IELTS ${skillName} flashcard set. Include accurate, useful content with active recall, realistic examples and ${skillName.toLocaleLowerCase()} prompts. Adapt to the supplied learner and request. Return only JSON with title (string), summary (string), items (4–16 objects). Each item has title (term/question), body (meaning/model answer/key explanation), and optional example (string), prompt (string), answer (string).`
+        : `Design a personalized visual mini slide deck for IELTS ${skillName}. Teach progressively with concise, accurate content, worked examples, and learner practice. Adapt to the supplied learner and request. Return only JSON with title (string), summary (string), items (4–12 objects). Each item has title (string), body (string), and optional example (string), prompt (string), answer (string, a useful coach note).`,
     },
   })
   const text = response.text?.trim()
-  if (!text) throw new Error('Gemini returned an empty learning module. Please try again.')
+  if (!text) throw new Error('Speakia AI returned an empty learning module. Please try again.')
   let decoded: unknown
   try {
     decoded = JSON.parse(text)
   } catch (error) {
-    console.error('Gemini returned invalid JSON for an interactive learning module.', error)
+    console.error('Speakia AI returned invalid JSON for an interactive learning module.', error)
     throw new Error('Speakia could not read the generated learning module. Please try again.')
   }
   if (!isRecord(decoded)) throw new Error('Speakia returned an incomplete learning module. Please try again.')
-  return createLearningModuleFromContent(kind, { ...decoded, topic })
+  return createLearningModuleFromContent(kind, { ...decoded, topic }, lessonType)
 }

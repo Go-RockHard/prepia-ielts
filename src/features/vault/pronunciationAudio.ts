@@ -1,5 +1,5 @@
-import { GoogleGenAI } from '@google/genai'
-import { PODCAST_TTS_MODELS, type PodcastTtsModel } from '@/features/podcasts/types'
+import { GoogleGenAI } from '@/lib/geminiClient'
+import type { PodcastTtsModel } from '@/features/podcasts/types'
 
 const DATABASE_NAME = 'speakia-lexical-pronunciation'
 const DATABASE_VERSION = 1
@@ -40,7 +40,7 @@ function pcmToWav(data: Uint8Array, mimeType: string): Blob {
   if (!Number.isFinite(bitsPerSample) || bitsPerSample <= 0 || bitsPerSample % 8 !== 0
     || !Number.isFinite(sampleRate) || sampleRate <= 0
     || !Number.isFinite(channels) || channels <= 0) {
-    throw new Error(`Gemini returned unsupported pronunciation audio format: ${mimeType || 'unknown format'}.`)
+    throw new Error(`Speakia AI returned unsupported pronunciation audio format: ${mimeType || 'unknown format'}.`)
   }
 
   const header = new ArrayBuffer(44)
@@ -95,17 +95,21 @@ export async function savePronunciationAudio(term: string, audio: Blob): Promise
   }
 }
 
-export async function synthesizePronunciation(apiKey: string, term: string): Promise<Blob> {
-  if (!apiKey.trim()) throw new Error('Add your Gemini API key in Settings to play a generated pronunciation.')
+export async function synthesizePronunciation(apiKey: string, term: string, example?: string): Promise<Blob> {
+  if (!apiKey.trim()) throw new Error('Add your Speakia AI API key in Settings to play a generated pronunciation.')
   const normalizedTerm = term.trim()
+  const normalizedExample = example?.trim()
   if (!normalizedTerm) throw new Error('There is no vocabulary term to pronounce.')
 
-  const model: PodcastTtsModel = PODCAST_TTS_MODELS[1].id
+  const model: PodcastTtsModel = 'gemini-3.8-flash-lite-tts'
+  const spokenText = [normalizedTerm.replace(/[.,;:!?]+$/, ''), normalizedExample]
+    .filter((text): text is string => Boolean(text))
+    .join('. ')
   const client = new GoogleGenAI({ apiKey: apiKey.trim() })
   try {
     const response = await client.models.generateContent({
       model,
-      contents: `Say only this word or expression with a clear, natural English pronunciation at a measured pace: ${normalizedTerm}`,
+      contents: spokenText,
       config: {
         responseModalities: ['AUDIO'],
         speechConfig: {
@@ -119,7 +123,7 @@ export async function synthesizePronunciation(apiKey: string, term: string): Pro
       .find((part) => part.inlineData?.data)
     const inlineData = audioPart?.inlineData
     const audioData = inlineData?.data
-    if (!audioData) throw new Error('Gemini returned no pronunciation audio.')
+    if (!audioData) throw new Error('Speakia AI returned no pronunciation audio.')
     const mimeType = inlineData.mimeType ?? 'audio/L16;rate=24000'
     const bytes = base64ToBytes(audioData)
     let audio: Blob
@@ -130,12 +134,12 @@ export async function synthesizePronunciation(apiKey: string, term: string): Pro
     } else {
       audio = pcmToWav(bytes, mimeType)
     }
-    if (!audio.size) throw new Error('Gemini returned an empty pronunciation audio file.')
+    if (!audio.size) throw new Error('Speakia AI returned an empty pronunciation audio file.')
     return audio
   } catch (error) {
-    console.error('Gemini pronunciation TTS generation failed.', error)
+    console.error('Speakia AI pronunciation TTS generation failed.', error)
     throw new Error(error instanceof Error
-      ? `Gemini could not generate this pronunciation: ${error.message}`
-      : 'Gemini could not generate this pronunciation. Please try again.')
+      ? `Speakia AI could not generate this pronunciation: ${error.message}`
+      : 'Speakia AI could not generate this pronunciation. Please try again.')
   }
 }

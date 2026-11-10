@@ -1,6 +1,6 @@
 import { State, type Card, type CardInput } from 'ts-fsrs'
 
-const STORAGE_KEY = 'speakia-flashcards-fsrs-v1'
+export type FlashcardProduct = 'speakia' | 'writia'
 
 export interface FlashcardProgress {
   sourceId: string
@@ -24,8 +24,8 @@ export interface FlashcardProgressLoad {
   error: string
 }
 
-function storageKey(username: string): string {
-  return `${STORAGE_KEY}:${username.trim().toLocaleLowerCase()}`
+function storageKey(username: string, product: FlashcardProduct): string {
+  return `${product}-flashcards-fsrs-v1:${username.trim().toLocaleLowerCase()}`
 }
 
 function isProgress(value: unknown): value is FlashcardProgress {
@@ -48,9 +48,9 @@ function isProgress(value: unknown): value is FlashcardProgress {
     && (item.reviewedAt === undefined || (typeof item.reviewedAt === 'string' && Number.isFinite(Date.parse(item.reviewedAt))))
 }
 
-export function loadFlashcardProgress(username: string): FlashcardProgressLoad {
+export function loadFlashcardProgress(username: string, product: FlashcardProduct = 'speakia'): FlashcardProgressLoad {
   try {
-    const stored = localStorage.getItem(storageKey(username))
+    const stored = localStorage.getItem(storageKey(username, product))
     if (!stored) return { items: [], error: '' }
     const parsed: unknown = JSON.parse(stored)
     if (!Array.isArray(parsed)) throw new Error('Saved flashcard progress is not a list.')
@@ -60,7 +60,7 @@ export function loadFlashcardProgress(username: string): FlashcardProgressLoad {
     }
     return { items, error: '' }
   } catch (error) {
-    console.error('Unable to load Speakia Flashcards progress.', error)
+    console.error(`Unable to load ${product} Flashcards progress.`, error)
     return {
       items: [],
       error: error instanceof Error ? error.message : 'Your saved flashcard progress could not be loaded.',
@@ -68,12 +68,12 @@ export function loadFlashcardProgress(username: string): FlashcardProgressLoad {
   }
 }
 
-export function saveFlashcardProgress(username: string, items: FlashcardProgress[]): string {
+export function saveFlashcardProgress(username: string, items: FlashcardProgress[], product: FlashcardProduct = 'speakia'): string {
   try {
-    localStorage.setItem(storageKey(username), JSON.stringify(items))
+    localStorage.setItem(storageKey(username, product), JSON.stringify(items))
     return ''
   } catch (error) {
-    console.error('Unable to save Speakia Flashcards progress.', error)
+    console.error(`Unable to save ${product} Flashcards progress.`, error)
     return error instanceof Error ? error.message : 'Your flashcard progress could not be saved.'
   }
 }

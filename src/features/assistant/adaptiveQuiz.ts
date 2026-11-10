@@ -1,4 +1,5 @@
-import { GoogleGenAI, Type, type FunctionDeclaration } from '@google/genai'
+import { Type, type FunctionDeclaration } from '@google/genai'
+import { GoogleGenAI } from '@/lib/geminiClient'
 
 export type QuizQuestionType = 'mcq' | 'true_false' | 'fill_blank' | 'dropdown'
 
@@ -158,7 +159,7 @@ interface QuizRequirements {
   expectedCounts?: Record<QuizQuestionType, number>
 }
 
-function getQuizRequirements(rawArgs: Record<string, unknown>): QuizRequirements {
+function getQuizRequirements(rawArgs: Record<string, unknown>, lessonType: 'speaking' | 'writing' = 'speaking'): QuizRequirements {
   if (!isRecord(rawArgs)) throw new Error('The quiz request was incomplete. Please try again.')
   const request = typeof rawArgs.request === 'string' ? rawArgs.request.trim().slice(0, 1000) : ''
   if (request.length < 3) throw new Error('Tell Speakia what you want to check in your quiz.')
@@ -182,7 +183,7 @@ function getQuizRequirements(rawArgs: Record<string, unknown>): QuizRequirements
   }
   return {
     request,
-    topic: typeof rawArgs.topic === 'string' && rawArgs.topic.trim() ? rawArgs.topic.trim().slice(0, 120) : 'IELTS Speaking',
+    topic: typeof rawArgs.topic === 'string' && rawArgs.topic.trim() ? rawArgs.topic.trim().slice(0, 120) : `IELTS ${lessonType === 'writing' ? 'Writing' : 'Speaking'}`,
     focus: typeof rawArgs.focus === 'string' && rawArgs.focus.trim() ? rawArgs.focus.trim().slice(0, 180) : request,
     count,
     ...(hasTypeCounts ? { expectedCounts: counts } : {}),
@@ -205,8 +206,8 @@ function buildAdaptiveQuiz(rawArgs: Record<string, unknown>, requirements: QuizR
   }
 }
 
-export function createAdaptiveQuizFromContent(rawArgs: Record<string, unknown>): AdaptiveQuiz {
-  const requirements = getQuizRequirements(rawArgs)
+export function createAdaptiveQuizFromContent(rawArgs: Record<string, unknown>, lessonType: 'speaking' | 'writing' = 'speaking'): AdaptiveQuiz {
+  const requirements = getQuizRequirements(rawArgs, lessonType)
   return buildAdaptiveQuiz(rawArgs, requirements)
 }
 
@@ -215,9 +216,12 @@ export async function createAdaptiveQuiz(
   rawArgs: Record<string, unknown>,
   learnerContext: unknown,
   model: string,
+  abortSignal?: AbortSignal,
+  lessonType: 'speaking' | 'writing' = 'speaking',
 ): Promise<AdaptiveQuiz> {
-  if (!apiKey.trim()) throw new Error('Add your Gemini API key in Settings to create a quiz.')
-  const requirements = getQuizRequirements(rawArgs)
+  if (!apiKey.trim()) throw new Error('Add your Speakia AI API key in Settings to create a quiz.')
+  const skillName = lessonType === 'writing' ? 'Writing' : 'Speaking'
+  const requirements = getQuizRequirements(rawArgs, lessonType)
   const client = new GoogleGenAI({ apiKey: apiKey.trim() })
   const response = await client.models.generateContent({
     model,
@@ -234,6 +238,7 @@ export async function createAdaptiveQuiz(
     }],
     config: {
       responseMimeType: 'application/json',
+      abortSignal,
       responseJsonSchema: {
         type: Type.OBJECT,
         properties: {
@@ -259,16 +264,16 @@ export async function createAdaptiveQuiz(
         required: ['title', 'questions'],
         propertyOrdering: ['title', 'questions'],
       },
-      systemInstruction: 'Create an accurate, adaptive interactive quiz that checks IELTS Speaking test knowledge and practical skills, such as test format, fluency, coherence, vocabulary, grammar, pronunciation, and natural language use. Return only JSON with a concise title and questions. Each question type must be exactly one of mcq, true_false, fill_blank, dropdown. MCQ and dropdown questions need 3–5 plausible options with exactly one correct option; true_false options must be exactly ["True","False"]; fill_blank must omit options and have a concise accepted answer. Include a short explanation teaching why the answer is correct. Adapt difficulty and focus to the supplied learner context and request. If exactQuestionCountsByType is supplied, match each count exactly, including zero-count types; return precisely requestedTotal questions when it is numeric.',
+      systemInstruction: `Create an accurate, adaptive interactive quiz that checks IELTS ${skillName} knowledge and practical skills, such as ${lessonType === 'writing' ? 'task response, task achievement, coherence and cohesion, lexical resource, grammar, planning, and editing' : 'test format, fluency, coherence, vocabulary, grammar, pronunciation, and natural language use'}. Return only JSON with a concise title and questions. Each question type must be exactly one of mcq, true_false, fill_blank, dropdown. MCQ and dropdown questions need 3–5 plausible options with exactly one correct option; true_false options must be exactly ["True","False"]; fill_blank must omit options and have a concise accepted answer. Include a short explanation teaching why the answer is correct. Adapt difficulty and focus to the supplied learner context and request. If exactQuestionCountsByType is supplied, match each count exactly, including zero-count types; return precisely requestedTotal questions when it is numeric.`,
     },
   })
   const text = response.text?.trim()
-  if (!text) throw new Error('Gemini returned an empty quiz. Please try again.')
+  if (!text) throw new Error('Speakia AI returned an empty quiz. Please try again.')
   let decoded: unknown
   try {
     decoded = JSON.parse(text)
   } catch (error) {
-    console.error('Gemini returned invalid JSON for an adaptive quiz.', error)
+    console.error('Speakia AI returned invalid JSON for an adaptive quiz.', error)
     throw new Error('Speakia could not read the generated quiz. Please try again.')
   }
   if (!isRecord(decoded)) throw new Error('Speakia returned an incomplete quiz. Please try again.')

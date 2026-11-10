@@ -1,4 +1,4 @@
-import { GoogleGenAI } from '@google/genai'
+import { GoogleGenAI } from '@/lib/geminiClient'
 import { PODCAST_TTS_MODELS } from '@/features/podcasts/types'
 
 const DATABASE_NAME = 'speakia-topic-model-answer-audio'
@@ -64,7 +64,7 @@ function pcmToWav(data: Uint8Array, mimeType: string): Blob {
   const sampleRate = Number(mimeType.match(/rate=(\d+)/i)?.[1] ?? 24000)
   const channels = Number(mimeType.match(/channels=(\d+)/i)?.[1] ?? 1)
   if (!Number.isFinite(sampleRate) || sampleRate <= 0 || !Number.isFinite(channels) || channels <= 0) {
-    throw new Error(`Gemini returned unsupported model-answer audio format: ${mimeType || 'unknown format'}.`)
+    throw new Error(`Speakia AI returned unsupported model-answer audio format: ${mimeType || 'unknown format'}.`)
   }
   const header = new ArrayBuffer(44)
   const view = new DataView(header)
@@ -90,7 +90,7 @@ function pcmToWav(data: Uint8Array, mimeType: string): Blob {
 }
 
 export async function generateModelAnswerAudio(apiKey: string, answer: string): Promise<Blob> {
-  if (!apiKey.trim()) throw new Error('Add your Gemini API key in Settings to generate model-answer audio.')
+  if (!apiKey.trim()) throw new Error('Add your Speakia AI API key in Settings to generate model-answer audio.')
   if (!answer.trim()) throw new Error('There is no model answer to read aloud.')
   const client = new GoogleGenAI({ apiKey: apiKey.trim() })
   try {
@@ -104,7 +104,7 @@ export async function generateModelAnswerAudio(apiKey: string, answer: string): 
     })
     const inlineData = response.candidates?.flatMap((candidate) => candidate.content?.parts ?? [])
       .find((part) => part.inlineData?.data)?.inlineData
-    if (!inlineData?.data) throw new Error('Gemini returned no model-answer audio.')
+    if (!inlineData?.data) throw new Error('Speakia AI returned no model-answer audio.')
     const bytes = base64ToBytes(inlineData.data)
     if (inlineData.mimeType?.toLocaleLowerCase().startsWith('audio/wav')) {
       const wavData = new ArrayBuffer(bytes.byteLength)
@@ -113,9 +113,9 @@ export async function generateModelAnswerAudio(apiKey: string, answer: string): 
     }
     return pcmToWav(bytes, inlineData.mimeType ?? 'audio/L16;rate=24000')
   } catch (error) {
-    console.error('Gemini model-answer TTS generation failed.', error)
+    console.error('Speakia AI model-answer TTS generation failed.', error)
     throw new Error(error instanceof Error
-      ? `Gemini could not generate model-answer audio: ${error.message}`
-      : 'Gemini could not generate model-answer audio. Please try again.')
+      ? `Speakia AI could not generate model-answer audio: ${error.message}`
+      : 'Speakia AI could not generate model-answer audio. Please try again.')
   }
 }

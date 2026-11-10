@@ -8,12 +8,21 @@ export function SentenceFeedbackList({ items }: { items: SentenceFeedback[] }) {
   }
 
   return <div className="sentence-feedback-list">
-    {items.map((item, index) => <Card className="sentence-feedback-card" key={`${index}-${item.originalSentence}`}>
-      <div className="sentence-feedback-heading"><Badge>Sentence {index + 1}</Badge><span>{item.issue}</span></div>
-      <blockquote>{item.originalSentence}</blockquote>
-      <div className="sentence-feedback-version"><strong>Suggested correction</strong><p>{item.correction}</p></div>
-      <div className="sentence-feedback-version sentence-feedback-band"><strong>Band 8-style alternative</strong><p>{item.bandEightVersion}</p></div>
-      <p className="sentence-feedback-explanation">{item.explanation}</p>
-    </Card>)}
+    {items.map((item, index) => <details className="sentence-feedback-card" key={`${index}-${item.originalSentence}`}>
+      <summary className="sentence-feedback-summary">
+        <span className="sentence-feedback-summary-topline">
+          <Badge>Sentence {index + 1}</Badge>
+          <span className="sentence-feedback-issue">{item.issue}</span>
+        </span>
+        <span className="sentence-feedback-preview">{item.originalSentence}</span>
+        <span className="sentence-feedback-expand-label">View feedback</span>
+      </summary>
+      <div className="sentence-feedback-detail">
+        <blockquote>{item.originalSentence}</blockquote>
+        <div className="sentence-feedback-version"><strong>Suggested correction</strong><p>{item.correction}</p></div>
+        <div className="sentence-feedback-version sentence-feedback-band"><strong>Band 8-style alternative</strong><p>{item.bandEightVersion}</p></div>
+        <p className="sentence-feedback-explanation">{item.explanation}</p>
+      </div>
+    </details>)}
   </div>
 }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AudioLines, Check, Clock3, FileAudio, LoaderCircle, MessageCircle, Sparkles, Target, Video } from 'lucide-react'
+import { AudioLines, Check, ChevronDown, Clock3, FileAudio, LoaderCircle, MessageCircle, Sparkles, Target, Video } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -17,14 +17,21 @@ import {
 import { assessMedia, normalizeYouTubeUrl, type MediaAssessment, type MediaAssessmentModel, type MediaAssessmentSource } from './assessment'
 import { loadMediaAssessments, loadMediaSource, saveMediaAssessments, saveMediaSource } from './storage'
 import { shareAudioWithCoach, shareYoutubeWithCoach } from '@/features/assistant/audioSharing'
-
 type ArchiveFilter = 'all' | MediaAssessmentSource
 type DisplayCriterion = MediaAssessment['criteria'][number]
 
 const modelOptions: { value: MediaAssessmentModel; label: string }[] = [
-  { value: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
-  { value: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro Preview' },
+  { value: 'gemini-3.8-flash', label: 'Prodia Core · balanced assessment' },
+  { value: 'gemini-3.5-flash-lite', label: 'Prodia Swift · efficient assessment' },
+  { value: 'gemini-3.1-pro-preview', label: 'Prodia Reasoning · deeper analysis' },
 ]
+
+function formatAssessmentDuration(durationMs: number): string {
+  const totalSeconds = Math.max(0, Math.round(durationMs / 1000))
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return minutes ? `${minutes}m ${seconds}s` : `${seconds}s`
+}
 
 const criterionColors: Record<DisplayCriterion['id'], string> = {
   fluency: '#7665cf',
@@ -46,6 +53,8 @@ export function MediaAssessmentPage({ apiKey, onOpenSettings }: { apiKey: string
   const [selectedAssessmentId, setSelectedAssessmentId] = useState<string | null>(null)
   const [archiveFilter, setArchiveFilter] = useState<ArchiveFilter>('all')
   const [busy, setBusy] = useState(false)
+  const [timerStartedAt, setTimerStartedAt] = useState<number | null>(null)
+  const [elapsedMs, setElapsedMs] = useState(0)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
 
@@ -55,13 +64,24 @@ export function MediaAssessmentPage({ apiKey, onOpenSettings }: { apiKey: string
   )
   const selectedAssessment = filteredAssessments.find((item) => item.id === selectedAssessmentId) ?? filteredAssessments[0] ?? null
 
+  useEffect(() => {
+    if (!busy || timerStartedAt === null) return
+    const updateElapsed = () => setElapsedMs(performance.now() - timerStartedAt)
+    updateElapsed()
+    const intervalId = window.setInterval(updateElapsed, 250)
+    return () => window.clearInterval(intervalId)
+  }, [busy, timerStartedAt])
+
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    const startedAt = performance.now()
     setBusy(true)
+    setTimerStartedAt(startedAt)
+    setElapsedMs(0)
     setError('')
     setNotice('')
     try {
-      if (!apiKey.trim()) throw new Error('Enter your Gemini API key to assess media.')
+      if (!apiKey.trim()) throw new Error('Enter your Speakia AI API key to assess media.')
       const normalizedYoutubeUrl = source === 'youtube' ? normalizeYouTubeUrl(youtubeUrl) : undefined
       if (source === 'audio' && !selectedFile) throw new Error('Choose an audio file to assess.')
 
@@ -70,6 +90,14 @@ export function MediaAssessmentPage({ apiKey, onOpenSettings }: { apiKey: string
         model,
         source,
         ...(source === 'audio' ? { file: selectedFile ?? undefined } : { youtubeUrl: normalizedYoutubeUrl }),
+      })
+      const durationMs = Math.round(performance.now() - startedAt)
+      assessment = { ...assessment, durationMs }
+      console.info('Media assessment completed.', {
+        assessmentId: assessment.id,
+        source: assessment.source,
+        model: assessment.model,
+        durationMs,
       })
       let replayWarning = ''
       if (source === 'audio' && selectedFile) {
@@ -95,6 +123,7 @@ export function MediaAssessmentPage({ apiKey, onOpenSettings }: { apiKey: string
       setError(caughtError instanceof Error ? caughtError.message : 'Unable to assess this media. Check your connection, API key, and model access.')
     } finally {
       setBusy(false)
+      setTimerStartedAt(null)
     }
   }
 
@@ -112,7 +141,7 @@ export function MediaAssessmentPage({ apiKey, onOpenSettings }: { apiKey: string
         <span className="media-intro-icon"><Sparkles size={20} /></span>
         <div><strong>Assessment, playback, and feedback in one place</strong><p>Review your original audio or video alongside a practice band, criterion-level feedback, transcript, strengths, and next steps.</p></div>
       </Card>
-      {!apiKey.trim() && <Card className="simulator-key-notice"><Target size={17} /><p>Add your Gemini API key in Settings to assess media.</p><Button variant="outline" size="sm" onClick={onOpenSettings}>Open Settings</Button></Card>}
+      {!apiKey.trim() && <Card className="simulator-key-notice"><Target size={17} /><p>Add your Speakia AI key in Settings to assess media.</p><Button variant="outline" size="sm" onClick={onOpenSettings}>Open Settings</Button></Card>}
 
       <Card className="media-assessment-form-card">
         <form onSubmit={(event) => void submit(event)}>
@@ -131,16 +160,16 @@ export function MediaAssessmentPage({ apiKey, onOpenSettings }: { apiKey: string
                 : <label className="media-input-label">YouTube URL <span>Public YouTube video link</span>
                   <input type="url" value={youtubeUrl} onChange={(event) => { setYoutubeUrl(event.target.value); setError('') }} placeholder="https://www.youtube.com/watch?v=…" />
                 </label>}
-              <label className="media-input-label media-model-label">Gemini model
+              <label className="media-input-label media-model-label">Prodia assessment model
                 <select value={model} onChange={(event) => setModel(event.target.value as MediaAssessmentModel)}>{modelOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
               </label>
             </div>
           </details>
 
-          <div className="media-privacy-note"><Target size={15} /><p>Media is sent from this browser to Google Gemini for assessment; uploaded audio is deleted from Gemini after processing when possible. For replay, selected audio is stored in this browser’s IndexedDB with the assessment. YouTube videos are replayed from their public URL. Google’s processing and retention policies apply. YouTube assessment availability, pricing, and rate limits may change.</p></div>
+          <div className="media-privacy-note"><Target size={15} /><p>Media is sent from this browser to the connected AI service for assessment; uploaded audio is removed after processing when supported. For replay, selected audio is stored in this browser’s IndexedDB with the assessment. YouTube videos are replayed from their public URL. The service’s processing and retention policies apply. YouTube assessment availability, pricing, and rate limits may change.</p></div>
           {error && <p className="media-assessment-error" role="alert">{error}</p>}
           {notice && <p className="media-assessment-success" role="status">{notice}</p>}
-          <div className="media-assessment-submit"><Button className="start-button" type="submit" disabled={busy}>{busy ? <><LoaderCircle className="spin-icon" size={16} /> Uploading &amp; assessing…</> : <><Sparkles size={16} /> Assess with {modelOptions.find((item) => item.value === model)?.label}</>}</Button></div>
+          <div className="media-assessment-submit"><Button className="start-button" type="submit" disabled={busy}>{busy ? <><LoaderCircle className="spin-icon" size={16} /> {source === 'audio' ? 'Uploading audio & assessing' : 'Assessing video'} · {formatAssessmentDuration(elapsedMs)}</> : <><Sparkles size={16} /> Assess with {modelOptions.find((item) => item.value === model)?.label}</>}</Button></div>
         </form>
       </Card>
 
@@ -153,7 +182,7 @@ export function MediaAssessmentPage({ apiKey, onOpenSettings }: { apiKey: string
           {filteredAssessments.length
             ? <div className="media-archive-list">{filteredAssessments.map((item) => <button key={item.id} className={`media-archive-item ${selectedAssessment?.id === item.id ? 'media-archive-item-active' : ''}`} aria-pressed={selectedAssessment?.id === item.id} onClick={() => setSelectedAssessmentId(item.id)}>
               <span className={`media-archive-icon media-archive-icon-${item.source}`}>{item.source === 'audio' ? <AudioLines size={17} /> : <Video size={17} />}</span>
-              <span className="media-archive-item-copy"><strong>{item.sourceName}</strong><small>{item.source === 'audio' ? 'Audio' : 'YouTube video'} · {formatDate(item.completedAt)}</small><small>{item.model === 'gemini-3.8-flash' ? 'Gemini 3.8 Flash' : 'Gemini 3.1 Pro Preview'}</small></span>
+              <span className="media-archive-item-copy"><strong>{item.sourceName}</strong><small>{item.source === 'audio' ? 'Audio' : 'YouTube video'} · {formatDate(item.completedAt)}</small><small>{modelOptions.find((option) => option.value === item.model)?.label ?? (item.model === 'gemini-pro-latest' ? 'Prodia Reasoning' : 'Prodia assessment model')}{item.durationMs === undefined ? '' : ` · ${formatAssessmentDuration(item.durationMs)}`}</small></span>
               <span className="media-archive-band">{item.overallBand.toFixed(1)}<small>/9</small></span>
             </button>)}</div>
             : <Card className="media-archive-empty"><Clock3 size={20} /><strong>No {archiveFilter === 'all' ? '' : `${archiveFilter === 'youtube' ? 'video' : 'audio'} `}assessments yet</strong><p>Complete an assessment to save it here for review.</p></Card>}
@@ -248,7 +277,7 @@ function AssessmentMediaPlayer({ assessment }: { assessment: MediaAssessment }) 
         <div><span className="section-kicker">ASSESSMENT SOURCE</span><h3>Replay your {assessment.source === 'audio' ? 'recording' : 'video'}</h3></div>
         <div className="media-source-player-actions">
           <span>{assessment.source === 'audio' ? <FileAudio size={16} /> : <Video size={16} />}{assessment.sourceName}</span>
-          <button type="button" className="media-discuss-coach" onClick={() => void discussWithCoach()} disabled={sharing || (assessment.source === 'audio' && !assessment.audioAvailable) || (assessment.source === 'youtube' && !assessment.sourceUrl)}><MessageCircle size={14} />{sharing ? 'Loading audio…' : 'Discuss with Coach'}</button>
+          <button type="button" className="media-discuss-coach" onClick={() => void discussWithCoach()} disabled={sharing || (assessment.source === 'audio' && !assessment.audioAvailable) || (assessment.source === 'youtube' && !assessment.sourceUrl)}><MessageCircle size={14} />{sharing ? 'Loading audio…' : 'Ask Speakia'}</button>
         </div>
       </div>
       {assessment.source === 'youtube'
@@ -264,6 +293,11 @@ function AssessmentMediaPlayer({ assessment }: { assessment: MediaAssessment }) 
 }
 
 function AssessmentDetails({ assessment }: { assessment: MediaAssessment }) {
+  const transcriptTurns = Array.isArray(assessment.transcript)
+    ? assessment.transcript
+    : assessment.transcript.trim()
+      ? [{ speaker: 'candidate' as const, text: assessment.transcript.trim() }]
+      : []
   const chartData = assessment.criteria.map((criterion) => ({
     id: criterion.id,
     name: criterion.id === 'fluency' ? 'Fluency'
@@ -277,7 +311,7 @@ function AssessmentDetails({ assessment }: { assessment: MediaAssessment }) {
   return <div className="media-assessment-results">
     <Card className="media-overall-card">
       <div><span className="section-kicker">OVERALL PRACTICE BAND</span><strong>{assessment.overallBand.toFixed(1)}<small> / 9</small></strong><Badge>Indicative only</Badge></div>
-      <div className="media-overall-meta"><span>{assessment.source === 'audio' ? <FileAudio size={15} /> : <Video size={15} />}{assessment.source === 'audio' ? 'Audio assessment' : 'YouTube assessment'}</span><small>{formatDate(assessment.completedAt)}</small><small>{assessment.model === 'gemini-3.8-flash' ? 'Gemini 3.8 Flash' : 'Gemini 3.1 Pro Preview'}</small></div>
+      <div className="media-overall-meta"><span>{assessment.source === 'audio' ? <FileAudio size={15} /> : <Video size={15} />}{assessment.source === 'audio' ? 'Audio assessment' : 'YouTube assessment'}</span><small>{formatDate(assessment.completedAt)}</small>{assessment.durationMs !== undefined && <small>Completed in {formatAssessmentDuration(assessment.durationMs)}</small>}<small>{modelOptions.find((option) => option.value === assessment.model)?.label ?? (assessment.model === 'gemini-pro-latest' ? 'Prodia Reasoning' : 'Prodia assessment model')}</small></div>
     </Card>
 
     <AssessmentMediaPlayer assessment={assessment} />
@@ -306,18 +340,43 @@ function AssessmentDetails({ assessment }: { assessment: MediaAssessment }) {
     </Card>)}</div>
 
     <div className="media-feedback-grid">
-      <Card><div className="media-feedback-heading"><Check size={16} /><strong>Strengths</strong></div><ul>{assessment.strengths.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul></Card>
-      <Card><div className="media-feedback-heading"><Target size={16} /><strong>Practice next</strong></div><ul>{assessment.nextSteps.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul></Card>
+      <Card className="media-feedback-card"><div className="media-feedback-heading"><Check size={16} /><strong>Strengths</strong></div><ul>{assessment.strengths.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul></Card>
+      <Card className="media-feedback-card"><div className="media-feedback-heading"><Target size={16} /><strong>Practice next</strong></div><ul>{assessment.nextSteps.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul></Card>
     </div>
 
-    <section className="media-sentence-feedback" aria-labelledby="media-sentence-feedback-heading">
-      <div className="media-sentence-feedback-heading"><div><span className="section-kicker">DETAILED LANGUAGE REVIEW</span><h3 id="media-sentence-feedback-heading">Sentence-by-sentence feedback</h3></div><span>{assessment.sentenceFeedback?.length ?? 0} sentences reviewed</span></div>
-      <SentenceFeedbackList items={assessment.sentenceFeedback ?? []} />
+    <section className="media-sentence-feedback">
+      <details className="media-sentence-feedback-accordion">
+        <summary aria-labelledby="media-sentence-feedback-heading">
+          <div className="media-sentence-feedback-heading">
+            <div>
+              <span className="section-kicker">DETAILED LANGUAGE REVIEW</span>
+              <h3 id="media-sentence-feedback-heading">Sentence-by-sentence feedback</h3>
+              <small>Compare up to 25 selected sentences with concise suggestions.</small>
+            </div>
+            <span>{assessment.sentenceFeedback?.length ?? 0} {assessment.sentenceFeedback?.length === 1 ? 'sentence' : 'sentences'}</span>
+          </div>
+          <ChevronDown size={18} aria-hidden="true" />
+        </summary>
+        <div className="media-sentence-feedback-content">
+          <SentenceFeedbackList items={assessment.sentenceFeedback ?? []} />
+        </div>
+      </details>
     </section>
 
     <details className="media-transcript">
-      <summary>Candidate transcript <span>{assessment.transcript.trim() ? 'View' : 'Not provided'}</span></summary>
-      <p>{assessment.transcript.trim() || 'Gemini did not return a transcript for this assessment.'}</p>
+      <summary>
+        <span className="media-transcript-title">{assessment.source === 'youtube' ? <Video size={16} /> : <FileAudio size={16} />}<strong>{assessment.source === 'youtube' ? 'Video transcript' : 'Audio transcript'}</strong></span>
+        <span>{transcriptTurns.length ? `${transcriptTurns.length} ${transcriptTurns.length === 1 ? 'turn' : 'turns'}` : 'Not available'}</span>
+      </summary>
+      {transcriptTurns.length
+        ? <>
+          <p className="media-transcript-note">Full conversation transcript · unclear speech is marked as [unintelligible].</p>
+          <div className="media-transcript-turns">{transcriptTurns.map((turn, index) => <article className={`media-transcript-turn media-transcript-turn-${turn.speaker}`} key={`${index}-${turn.speaker}`}>
+            <div className="media-transcript-turn-heading"><span>{turn.speaker === 'examiner' ? 'Examiner' : 'Candidate'}</span><small>Turn {index + 1}</small></div>
+            <p>{turn.text}</p>
+          </article>)}</div>
+        </>
+        : <p className="media-transcript-empty">Speakia could not create an audible transcript for this assessment.</p>}
     </details>
     <p className="evaluation-disclaimer">AI-generated speaking practice feedback, not an official IELTS score or a substitute for a certified examiner. The archive is saved in this browser and is not synced across devices.</p>
     {assessment.cleanupWarning && <p className="media-cleanup-warning" role="status">{assessment.cleanupWarning}</p>}

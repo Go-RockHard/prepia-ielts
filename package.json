@@ -4,10 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
+    "dev": "webpack serve --mode development",
+    "build": "tsc -b && webpack --mode production",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "webpack serve --mode production"
   },
   "dependencies": {
     "@google/genai": "^2.28.0",
@@ -19,18 +19,30 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "recharts": "^3.10.1",
-    "tailwind-merge": "^3.7.0",
+    "tailwind-merge": "^2.6.0",
     "ts-fsrs": "^5.4.2"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.3.3",
+    "@babel/core": "^7.28.5",
+    "@babel/preset-env": "^7.28.5",
+    "@babel/preset-react": "^7.28.5",
+    "@babel/preset-typescript": "^7.28.5",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
-    "@vitejs/plugin-react": "^6.1.1",
+    "autoprefixer": "^10.4.27",
+    "babel-loader": "^10.1.1",
+    "copy-webpack-plugin": "^14.0.0",
+    "css-loader": "^7.1.5",
+    "html-webpack-plugin": "^5.6.8",
     "oxlint": "^1.81.0",
-    "tailwindcss": "^4.3.3",
+    "postcss": "^8.5.6",
+    "postcss-loader": "^8.2.0",
+    "style-loader": "^4.0.0",
+    "tailwindcss": "^3.4.17",
     "typescript": "~6.0.2",
-    "vite": "^8.3.0"
+    "webpack": "^5.112.2",
+    "webpack-cli": "^6.0.1",
+    "webpack-dev-server": "^5.2.3"
   }
 }

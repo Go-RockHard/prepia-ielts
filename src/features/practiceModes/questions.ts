@@ -1,0 +1,105 @@
+import { promptsForPart as simulatorPrompts, type SpeakingPrompt } from '@/features/simulator/questions'
+import type { TestPart } from '@/features/simulator/types'
+
+const partOneTopics: Array<[string, string[]]> = [
+  ['Home and accommodation', ['What do you like most about your home?', 'How long have you lived there?', 'Which room do you spend the most time in?', 'Would you like to live somewhere else in the future?']],
+  ['Hometown', ['What is your hometown like?', 'What do you like most about it?', 'Has it changed much since you were a child?', 'Would you recommend it as a place to live?']],
+  ['Work or study', ['Do you work or are you a student?', 'What do you enjoy most about your work or studies?', 'What would you like to do in the future?', 'Is there anything you would change about your daily routine?']],
+  ['Family', ['Do you have a large or small family?', 'Who in your family do you spend the most time with?', 'What activities do your family enjoy doing together?', 'How important is family time to you?']],
+  ['Friends', ['How often do you meet your friends?', 'What do you usually do together?', 'Do you prefer having a few close friends or many friends?', 'How do people make new friends where you live?']],
+  ['Free time', ['What do you enjoy doing in your free time?', 'Do you have more free time now than when you were younger?', 'Do you prefer relaxing at home or going out?', 'Is there a new activity you would like to try?']],
+  ['Reading', ['Do you enjoy reading?', 'What kinds of things do you like to read?', 'Did you read more when you were younger?', 'Do you prefer reading on paper or on a screen?']],
+  ['Music', ['What kind of music do you enjoy?', 'When do you usually listen to music?', 'Have your musical tastes changed over time?', 'Can you play a musical instrument?']],
+  ['Food', ['What kind of food do you enjoy eating?', 'Do you like cooking?', 'Is there a food you disliked as a child but enjoy now?', 'How often do you eat with other people?']],
+  ['Cooking', ['How often do you cook?', 'Who taught you to cook?', 'What dish do you make well?', 'Would you like to learn to cook something new?']],
+  ['Shopping', ['Do you enjoy shopping?', 'What do you usually buy online?', 'Do you prefer shopping alone or with others?', 'Have your shopping habits changed recently?']],
+  ['Weather', ['What kind of weather do you like best?', 'What is the weather usually like where you live?', 'Does the weather affect what you do?', 'Would you like to live in a different climate?']],
+  ['Transport', ['How do you usually travel around your city?', 'What is the most popular form of transport where you live?', 'Do you prefer travelling by car or public transport?', 'Is there anything you would improve about local transport?']],
+  ['Travel', ['Do you enjoy travelling?', 'What kind of places do you like to visit?', 'Do you prefer travelling alone or with other people?', 'Where would you like to go on your next trip?']],
+  ['Technology', ['What piece of technology do you use most often?', 'Has technology changed the way you study or work?', 'Do you enjoy learning how to use new technology?', 'Is there any technology you would like to own?']],
+  ['Mobile phones', ['How often do you use your mobile phone?', 'What do you use it for most?', 'Were mobile phones important to you as a child?', 'Could you go a day without your phone?']],
+  ['Sports and exercise', ['Do you do any sport or exercise?', 'What sports are popular where you live?', 'Did you enjoy sports at school?', 'Is there a sport you would like to try?']],
+  ['Hobbies', ['Do you have a hobby?', 'How did you become interested in it?', 'Do you prefer hobbies you can do alone or with others?', 'Is there a hobby you would like to take up?']],
+  ['Daily routine', ['What is the busiest part of your day?', 'Do you usually plan your day?', 'Has your daily routine changed recently?', 'What part of your routine do you enjoy most?']],
+  ['Public places', ['What public places do you often visit?', 'Is there a park or public space near your home?', 'What makes a public place enjoyable?', 'Would you like more public spaces in your area?']],
+  ['Photography', ['Do you like taking photographs?', 'What do you usually take pictures of?', 'Do you prefer taking photos or looking at them?', 'Do you keep your photographs organised?']],
+  ['Celebrations', ['What celebrations are important in your country?', 'How do you usually celebrate your birthday?', 'Do you prefer small or large celebrations?', 'Have the way you celebrate changed since childhood?']],
+  ['Neighbours', ['Do you know many of your neighbours?', 'What makes someone a good neighbour?', 'Did you know your neighbours when you were a child?', 'Do people in your area help one another?']],
+  ['Mornings', ['Are you usually active in the morning?', 'What is your morning routine like?', 'Did you enjoy getting up early as a child?', 'Would you like to change anything about your mornings?']],
+  ['Clothes', ['What kind of clothes do you usually wear?', 'Do you prefer comfortable or fashionable clothes?', 'Have your clothing choices changed over time?', 'Do you enjoy buying clothes?']],
+  ['Languages', ['What languages can you speak?', 'Which language would you like to learn?', 'Is it easy to learn a new language where you live?', 'How do people practise a language outside class?']],
+  ['Parks and gardens', ['Do you often visit parks or gardens?', 'What do people usually do in parks near you?', 'Did you play in parks as a child?', 'Would you like more green spaces in your area?']],
+  ['Names', ['Who chose your name?', 'Is your name common where you live?', 'Do you like the meaning of your name?', 'Do people in your country name children after relatives?']],
+  ['Weekends', ['What do you usually do at weekends?', 'Are your weekends different from weekdays?', 'Did you have more free time at weekends as a child?', 'Would you prefer a longer weekend?']],
+  ['Emails and messages', ['Do you prefer calling or messaging people?', 'How often do you send emails?', 'Do you write longer messages than you used to?', 'What makes a message easy to understand?']],
+  ['Public transport', ['How often do you use public transport?', 'What do you like about the transport in your area?', 'Is public transport popular with young people?', 'What improvement would make it more convenient?']],
+  ['Noise', ['Is your neighbourhood usually quiet or noisy?', 'What kinds of sounds do you hear every day?', 'Do you prefer working in silence?', 'Has noise become a bigger problem where you live?']],
+  ['Art', ['Do you enjoy looking at art?', 'Did you have art lessons at school?', 'What kinds of art are popular in your country?', 'Would you like to visit an art gallery?']],
+  ['Taking breaks', ['How often do you take breaks during the day?', 'What do you usually do during a short break?', 'Did you take breaks differently when you were younger?', 'Do you think people should take more breaks at work?']],
+  ['Online learning', ['Have you taken an online course?', 'What do you like about learning online?', 'Do you learn better alone or with a teacher?', 'What would make online classes more engaging?']],
+  ['Making lists', ['Do you make lists to organise your day?', 'What kinds of things do you write on a list?', 'Did you make lists as a child?', 'Do you prefer digital or handwritten lists?']],
+  ['Keeping in touch', ['How do you keep in touch with friends who live far away?', 'How often do you contact your relatives?', 'Has technology changed how people stay in touch?', 'Do you prefer meeting people face to face?']],
+]
+
+const partTwoCueCards: Array<[string, string]> = [
+  ['A person who has helped you', 'Describe a person who has helped you. You should say who the person is, when they helped you, what they did, and explain how you felt about their help.'],
+  ['A memorable journey', 'Describe a journey you remember well. You should say where you went, who you travelled with, what you did, and explain why you remember it.'],
+  ['A useful object', 'Describe an object that you use often. You should say what it is, when you got it, how you use it, and explain why it is useful to you.'],
+  ['A place you enjoy visiting', 'Describe a place you enjoy visiting. You should say where it is, how you found out about it, what you do there, and explain why you enjoy going there.'],
+  ['A book you enjoyed', 'Describe a book you enjoyed reading. You should say what the book is about, when you read it, what you liked about it, and explain who you would recommend it to.'],
+  ['A skill you learned', 'Describe a skill you learned. You should say what the skill is, how you learned it, how long it took, and explain how you feel about having this skill.'],
+  ['A celebration you attended', 'Describe a celebration you attended. You should say what was being celebrated, where it took place, who was there, and explain why it was memorable.'],
+  ['A meal with other people', 'Describe a memorable meal you had with other people. You should say who you ate with, where you ate, what you ate, and explain why you remember the meal.'],
+  ['A memorable photograph', 'Describe a photograph that is important to you. You should say when it was taken, what it shows, who took it, and explain why it is meaningful to you.'],
+  ['A time you solved a problem', 'Describe a problem you solved. You should say what the problem was, how you dealt with it, whether anyone helped you, and explain what you learned from the experience.'],
+  ['A person you admire', 'Describe a person you admire. You should say who the person is, how you know about them, what qualities they have, and explain why you admire them.'],
+  ['A quiet place', 'Describe a quiet place you like to go to. You should say where it is, how often you go there, what you do there, and explain why you like the place.'],
+  ['A time you learned something new', 'Describe a time you learned something new. You should say what you learned, how you learned it, why you wanted to learn it, and explain how you felt afterwards.'],
+  ['A useful website or app', 'Describe a website or app you use regularly. You should say what it is, how you learned about it, what you use it for, and explain why you find it useful.'],
+  ['A gift you gave someone', 'Describe a gift you gave to someone. You should say who you gave it to, what the gift was, why you chose it, and explain how the person reacted.'],
+  ['A time you were late', 'Describe a time you were late for something important. You should say when it happened, where you were going, why you were late, and explain how you felt about it.'],
+  ['An outdoor activity', 'Describe an outdoor activity you enjoy. You should say what the activity is, where you do it, who you do it with, and explain why you enjoy it.'],
+  ['A rule you agree with', 'Describe a rule you think is important. You should say what the rule is, who it applies to, why it exists, and explain why you agree with it.'],
+  ['A time you received good news', 'Describe a time you received good news. You should say what the news was, how you heard it, who you shared it with, and explain why it made you happy.'],
+  ['A building you find interesting', 'Describe an interesting building. You should say where it is, what it looks like, what it is used for, and explain why you find it interesting.'],
+  ['A difficult decision', 'Describe an important decision you made. You should say what the decision was, when you made it, what choices you considered, and explain why you chose that option.'],
+  ['An achievement you are proud of', 'Describe an achievement you are proud of. You should say what you achieved, how you achieved it, who helped you, and explain why it matters to you.'],
+  ['A time you tried something new', 'Describe a time you tried something for the first time. You should say what you did, when and where you did it, who was with you, and explain how you felt about the experience.'],
+  ['A plan that changed', 'Describe a plan that you had to change. You should say what the original plan was, why it changed, what you did instead, and explain how you felt about the change.'],
+  ['A crowded place', 'Describe a crowded place you have been to. You should say where it was, when you went there, what people were doing, and explain how you felt in that place.'],
+  ['A piece of advice', 'Describe a useful piece of advice someone gave you. You should say what the advice was, who gave it to you, when you received it, and explain how it helped you.'],
+  ['A conversation you remember', 'Describe an interesting conversation you had. You should say who you spoke with, where you were, what you discussed, and explain why you remember it.'],
+  ['A time you worked in a team', 'Describe a time you worked with other people as a team. You should say what you were trying to do, who you worked with, what your role was, and explain whether the team succeeded.'],
+  ['A place in nature', 'Describe a natural place you would like to visit. You should say where it is, what it is like, what you would do there, and explain why you want to visit it.'],
+  ['A useful change', 'Describe a positive change in your life. You should say what changed, when it happened, how you adapted, and explain why the change was beneficial.'],
+  ['A time you helped someone', 'Describe a time you helped another person. You should say who the person was, what help you gave, why they needed help, and explain how you felt afterwards.'],
+  ['A memorable event in your community', 'Describe an event that took place in your community. You should say what the event was, who organised it, what happened, and explain why people remember it.'],
+  ['A useful item of technology', 'Describe a piece of technology that is useful to you. You should say what it is, how you use it, how you learned to use it, and explain why it is important in your daily life.'],
+  ['A person with an interesting job', 'Describe someone whose job you find interesting. You should say who the person is, what their job involves, how you learned about it, and explain why it interests you.'],
+  ['A time you waited for something', 'Describe a time you waited for something important. You should say what you were waiting for, where you were, how long you waited, and explain how you felt.'],
+  ['A rule you would change', 'Describe a rule you would like to change. You should say what the rule is, where it applies, why you would change it, and explain what the new rule should be.'],
+]
+
+const partOnePrompts: SpeakingPrompt[] = partOneTopics.flatMap(([topic, questions], topicIndex) => questions.map((question, questionIndex) => ({
+  id: `practice-p1-${topicIndex + 1}-${questionIndex + 1}`,
+  part: 'part1',
+  topic,
+  question,
+  preparationSeconds: 0,
+  responseSeconds: 45,
+})))
+
+const partTwoPrompts: SpeakingPrompt[] = partTwoCueCards.map(([topic, question], index) => ({
+  id: `practice-p2-cue-${index + 1}`,
+  part: 'part2',
+  topic,
+  question,
+  preparationSeconds: 60,
+  responseSeconds: 120,
+}))
+
+export function practicePromptsForPart(part: Exclude<TestPart, 'full'>): SpeakingPrompt[] {
+  if (part === 'part1') return partOnePrompts
+  if (part === 'part2') return partTwoPrompts
+  return simulatorPrompts('part3')
+}

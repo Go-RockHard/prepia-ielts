@@ -61,13 +61,14 @@ const playbackController = (() => {
 
 interface TranscriptAudioListProps {
   turns: TranscriptEntry[]
-  variant: 'history' | 'evaluation' | 'live'
+  variant: 'history' | 'evaluation' | 'live' | 'coach'
   testId?: string
   activeTurnId?: string | null
   activeWordIndex?: number
+  compact?: boolean
 }
 
-export function TranscriptAudioList({ turns, variant, testId, activeTurnId, activeWordIndex = -1 }: TranscriptAudioListProps) {
+export function TranscriptAudioList({ turns, variant, testId, activeTurnId, activeWordIndex = -1, compact = false }: TranscriptAudioListProps) {
   const listId = useId()
   const [playingTurnId, setPlayingTurnId] = useState<string | null>(null)
   const [playbackTime, setPlaybackTime] = useState(0)
@@ -132,7 +133,7 @@ export function TranscriptAudioList({ turns, variant, testId, activeTurnId, acti
   }
 
   return <>
-    <p className="transcript-audio-note">New sessions use original microphone and examiner audio. Older sessions may not have saved turn audio.</p>
+    {variant !== 'coach' && <p className="transcript-audio-note">New sessions use original microphone and examiner audio. Older sessions may not have saved turn audio.</p>}
     {turns.map((turn, index) => {
       const turnId = `${listId}:${index}`
       const isPlaying = playingTurnId === turnId
@@ -140,7 +141,23 @@ export function TranscriptAudioList({ turns, variant, testId, activeTurnId, acti
       const playbackWordIndex = isPlaying
         ? wordIndexAtElapsed(turn.text, playbackTime, playbackDuration)
         : liveActive ? activeWordIndex : -1
-      const label = turn.role === 'examiner' ? 'EXAMINER' : turn.role === 'assessment' ? 'GEMINI AUDIO TRANSCRIPT' : 'YOU'
+      const label = variant === 'coach'
+        ? turn.role === 'candidate' ? 'YOU' : 'SPEAKIA COACH'
+        : turn.role === 'examiner' ? 'EXAMINER' : turn.role === 'assessment' ? 'SPEAKIA ASSESSMENT TRANSCRIPT' : 'YOU'
+      const speaker = variant === 'coach'
+        ? turn.role === 'candidate' ? 'your' : 'Speakia Coach'
+        : turn.role === 'examiner' ? 'examiner' : 'your'
+      if (compact) return <div className="transcript-audio-compact" key={`${index}-${turn.role}`}>
+        <button
+          type="button"
+          className="transcript-turn-audio"
+          onClick={() => void togglePlayback(turn, index)}
+          aria-label={`${isPlaying ? 'Stop' : 'Listen to'} ${speaker} transcript turn`}
+          title={isPlaying ? 'Stop transcript playback' : `Play ${speaker} original voice`}
+        >
+          {isPlaying ? <VolumeX size={12} /> : <Volume2 size={12} />}
+        </button>
+      </div>
       return (
         <div
           className={variant === 'history'

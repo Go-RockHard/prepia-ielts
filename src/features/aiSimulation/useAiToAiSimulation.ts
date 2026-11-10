@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { GoogleGenAI, Modality, type LiveServerMessage, type Session } from '@google/genai'
+import { Modality, type LiveServerMessage, type Session } from '@google/genai'
+import { GoogleGenAI } from '@/lib/geminiClient'
+import { getProdiaLiveModel } from '@/lib/geminiModels'
 import { mergeTranscriptText } from '@/features/simulator/transcript'
 import { loadAiSimulations, saveAiSimulationAudio, saveAiSimulations } from './storage'
 import type { AiSimulationPart, AiSimulationRecord, AiSimulationTurn } from './types'
@@ -10,21 +12,39 @@ export type AiSimulationSpeaker = 'examiner' | 'candidate' | null
 type SimulationPhase = 'part1' | 'part2-long' | 'part2-followup' | 'part3' | 'full-part1' | 'full-part2' | 'full-part2-followup' | 'full-part3' | 'ending'
 type Turn = AiSimulationTurn
 
+interface SimulationCueCard {
+  title: string
+  prompt: string
+}
+
 function partLabel(part: AiSimulationPart): string {
   if (part === 'full') return 'Full IELTS Speaking test'
   return `IELTS Speaking Part ${part.slice(-1)}`
 }
 
-function examinerInstructions(part: AiSimulationPart, topic: string): string {
-  return `You are a professional IELTS Speaking examiner running a practice simulation with an AI candidate. Speak naturally and neutrally, ask one question at a time, and do not coach, score, praise, or correct the candidate. The selected test is ${partLabel(part)} and the focus topic is ${topic}. Follow controller instructions precisely: they specify the next stage and number of questions. For Part 2, present a realistic cue card, allow a brief preparation pause, and invite a long turn. In Part 3, ask concise abstract discussion questions. At the end, thank the candidate and say the practice test is complete. Never claim to be an official examiner. Output spoken words only, with no labels or stage directions.`
+function examinerInstructions(part: AiSimulationPart, topic: string, cueCard: SimulationCueCard | undefined, transcriptGuide?: string): string {
+  const transcriptDirection = transcriptGuide
+    ? `Use this supplied sample transcript as the exact question sequence and topic reference. Ask the sample questions in order, adapting only minor wording so the speech remains natural. Do not skip a test part or add extra questions.\n${transcriptGuide}\n`
+    : ''
+  const cueCardDirection = cueCard
+    ? `Use this exact selected Part 2 cue card. Read its task and prompts faithfully; do not invent a replacement card:\nTitle: ${cueCard.title}\n${cueCard.prompt}\n`
+    : 'For Part 2, randomly choose a fresh, realistic IELTS cue-card topic yourself and present three or four clear prompts. '
+  return `You are a professional IELTS Speaking examiner running a practice simulation with an AI candidate. Speak naturally and neutrally at a measured, unhurried conversational pace, with brief natural pauses between thoughts. Ask one question at a time, and do not coach, score, praise, or correct the candidate. The selected test is ${partLabel(part)} and the focus topic is ${topic}. Follow controller instructions precisely: they specify the next stage and number of questions. ${transcriptDirection}${cueCardDirection}For Part 2, allow a brief preparation pause and invite a long turn. In Part 3, ask concise abstract discussion questions. At the end, thank the candidate and say the practice test is complete. Never claim to be an official examiner. Output spoken words only, with no labels or stage directions.`
 }
 
-function candidateInstructions(part: AiSimulationPart, topic: string): string {
-  return `You are an IELTS Speaking candidate in a practice simulation, responding to a separate AI examiner. The selected format is ${partLabel(part)} and the focus topic is ${topic}. Answer only the examiner's latest question, naturally and directly. For Part 1 or Part 3, speak for roughly 15–30 seconds with a clear point and a supporting detail or example. For a Part 2 cue card, give one coherent first-person long turn with a beginning, development, and clear ending, as if speaking for up to two minutes. Do not ask the examiner questions, give feedback, mention AI, or use labels, bullet points, or stage directions. Use realistic intermediate-to-advanced English without sounding memorized.`
+function candidateInstructions(part: AiSimulationPart, topic: string, cueCard: SimulationCueCard | undefined, transcriptGuide?: string): string {
+  const transcriptDirection = transcriptGuide
+    ? `Use the supplied candidate responses as a model for the matching questions. Preserve the main details and ideas while speaking naturally; do not recite labels or examiner text.\n${transcriptGuide}\n`
+    : ''
+  const cueCardDirection = cueCard ? `The examiner will use this selected card; answer its prompts: ${cueCard.title}. ${cueCard.prompt}\n` : ''
+  return `You are an IELTS Speaking candidate in a practice simulation, responding to a separate AI examiner. The selected format is ${partLabel(part)} and the focus topic is ${topic}. Answer only the examiner's latest question, naturally and directly, at a measured conversational pace with brief natural pauses. ${transcriptDirection}${cueCardDirection}For Part 1 or Part 3, speak for roughly 15–30 seconds with a clear point and a supporting detail or example. For a Part 2 cue card, give one coherent first-person long turn with a beginning, development, and clear ending, as if speaking for up to two minutes. Do not ask the examiner questions, give feedback, mention AI, or use labels, bullet points, or stage directions. Use realistic intermediate-to-advanced English without sounding memorized.`
 }
 
-function initialExaminerPrompt(part: AiSimulationPart, topic: string): string {
-  if (part === 'part2') return `Begin Part 2. Introduce the cue-card task about ${topic}, give the candidate one minute to prepare and up to two minutes to speak, then present a clear cue card with three or four prompts. Ask the candidate to begin their long turn.`
+function initialExaminerPrompt(part: AiSimulationPart, topic: string, cueCard: SimulationCueCard | undefined): string {
+  const selectedCard = cueCard
+    ? `Present this exact Part 2 cue card titled "${cueCard.title}":\n${cueCard.prompt}`
+    : `Randomly choose a fresh IELTS Part 2 cue-card topic about ${topic} and create three or four clear prompts.`
+  if (part === 'part2') return `Begin Part 2. ${selectedCard} Give the candidate one minute to prepare and up to two minutes to speak, then invite them to begin their long turn.`
   if (part === 'part3') return `Begin Part 3 with a concise transition and ask one abstract discussion question connected to ${topic}.`
   return `Begin ${part === 'full' ? 'the full test with Part 1' : 'Part 1'}. Briefly introduce the speaking test, then ask one familiar-topic question about ${topic}. Ask only one question and wait for the candidate's answer.`
 }
@@ -96,6 +116,7 @@ export function useAiToAiSimulation(username: string, apiKey: string) {
   const turnTextRef = useRef('')
   const turnCompleteRef = useRef(false)
   const pendingAudioRef = useRef(0)
+  const finishAfterAudioRef = useRef(false)
   const audioContextRef = useRef<AudioContext | null>(null)
   const scheduledSourcesRef = useRef<AudioBufferSourceNode[]>([])
   const nextAudioTimeRef = useRef(0)
@@ -106,8 +127,11 @@ export function useAiToAiSimulation(username: string, apiKey: string) {
   const startedAtRef = useRef('')
   const startedTimeRef = useRef(0)
   const sessionIdRef = useRef('')
+  const templateIdRef = useRef('')
+  const templateTitleRef = useRef('')
   const partRef = useRef<AiSimulationPart | null>(null)
   const topicRef = useRef('')
+  const cueCardRef = useRef<SimulationCueCard | undefined>(undefined)
   const stateRef = useRef<AiSimulationState>('idle')
   const finishRef = useRef<(status: 'completed' | 'stopped') => Promise<void>>(async () => {})
 
@@ -121,14 +145,17 @@ export function useAiToAiSimulation(username: string, apiKey: string) {
   }, [state])
   useEffect(() => {
     if (state !== 'live') return
-    const timer = window.setInterval(() => {
+    let frame = 0
+    const updateClock = () => {
       const context = audioContextRef.current
       const startAt = activeAudioStartRef.current
       setSpeechElapsedSeconds(context && startAt !== null
         ? Math.max(0, context.currentTime - startAt)
         : 0)
-    }, 60)
-    return () => window.clearInterval(timer)
+      frame = window.requestAnimationFrame(updateClock)
+    }
+    frame = window.requestAnimationFrame(updateClock)
+    return () => window.cancelAnimationFrame(frame)
   }, [state])
   useEffect(() => () => {
     void finishRef.current('stopped')
@@ -143,6 +170,7 @@ export function useAiToAiSimulation(username: string, apiKey: string) {
     if (finishingRef.current || !activeRef.current) return
     finishingRef.current = true
     activeRef.current = false
+    finishAfterAudioRef.current = false
     setCurrentState('saving')
     setActiveSpeaker(null)
 
@@ -177,6 +205,9 @@ export function useAiToAiSimulation(username: string, apiKey: string) {
       }
       const record: AiSimulationRecord = {
         id,
+        ...(templateIdRef.current ? { templateId: templateIdRef.current } : {}),
+        ...(templateTitleRef.current ? { templateTitle: templateTitleRef.current } : {}),
+        mode: 'ai-to-ai',
         part: partValue,
         topic: topicRef.current,
         startedAt: startedAtRef.current,
@@ -185,7 +216,7 @@ export function useAiToAiSimulation(username: string, apiKey: string) {
         status: finalStatus,
         turns: simulationTurns,
         audioAvailable,
-        model: 'gemini-3.8-live',
+        model: getProdiaLiveModel(),
       }
       const updated = [record, ...recordsRef.current.filter((item) => item.id !== id)]
       if (saveAiSimulations(username, updated)) {
@@ -201,6 +232,7 @@ export function useAiToAiSimulation(username: string, apiKey: string) {
     turnTextRef.current = ''
     turnCompleteRef.current = false
     pendingAudioRef.current = 0
+    finishAfterAudioRef.current = false
     setCurrentState('idle')
     setPart(null)
     partRef.current = null
@@ -215,7 +247,6 @@ export function useAiToAiSimulation(username: string, apiKey: string) {
     turnIdRef.current = crypto.randomUUID()
     turnTextRef.current = ''
     turnCompleteRef.current = false
-    pendingAudioRef.current = 0
     activeAudioStartRef.current = null
     turnAudioStartSecondsRef.current = pcmChunksRef.current.reduce((total, chunk) => total + chunk.byteLength, 0) / 48000
     turnAudioDurationSecondsRef.current = 0
@@ -251,7 +282,7 @@ export function useAiToAiSimulation(username: string, apiKey: string) {
   }
 
   async function handleTurnComplete() {
-    if (!turnCompleteRef.current || pendingAudioRef.current > 0 || !turnRoleRef.current || !activeRef.current) return
+    if (!turnCompleteRef.current || !turnRoleRef.current || !activeRef.current) return
     const role = turnRoleRef.current
     const text = turnTextRef.current.trim()
     updateCurrentTurn('', true)
@@ -268,7 +299,8 @@ export function useAiToAiSimulation(username: string, apiKey: string) {
 
     if (role === 'examiner') {
       if (phaseRef.current === 'ending') {
-        await finishRef.current('completed')
+        if (pendingAudioRef.current > 0) finishAfterAudioRef.current = true
+        else await finishRef.current('completed')
       } else {
         sendPrompt('candidate', `The examiner has just said: ${text}\nRespond as the IELTS candidate to the question or cue card. Speak only your answer.`)
       }
@@ -286,7 +318,7 @@ export function useAiToAiSimulation(username: string, apiKey: string) {
       } else examinerCue = `The candidate answered: ${text}\nAsk the next distinct Part 1 question about ${topicRef.current}. Ask one question only.`
     } else if (phase === 'part2-long') {
       phaseRef.current = 'part2-followup'
-      examinerCue = `The candidate has completed the Part 2 long turn. Ask one brief, relevant follow-up question about ${topicRef.current}.`
+      examinerCue = `The candidate has completed the Part 2 long turn. Ask one brief, relevant follow-up question about ${cueCardRef.current?.title ?? topicRef.current}.`
     } else if (phase === 'part2-followup') {
       phaseRef.current = 'ending'
       examinerCue = `The candidate answered: ${text}\nThank them and clearly close this Part 2 practice.`
@@ -296,19 +328,21 @@ export function useAiToAiSimulation(username: string, apiKey: string) {
         examinerCue = 'That completes the five Part 3 discussion questions. Briefly thank the candidate and say the practice test is complete.'
       } else examinerCue = `The candidate answered: ${text}\nAsk the next distinct Part 3 discussion question related to ${topicRef.current}. Ask one question only.`
     } else if (phase === 'full-part1') {
-      if (candidateAnswersRef.current >= 3) {
+      if (candidateAnswersRef.current >= 5) {
         phaseRef.current = 'full-part2'
-        examinerCue = `The candidate has completed three Part 1 questions. Transition naturally to Part 2 and present a cue card about ${topicRef.current}, with three or four prompts. Give one minute to prepare and invite a long turn.`
+        examinerCue = cueCardRef.current
+          ? `The candidate has completed five Part 1 questions. Transition naturally to Part 2 and present this exact selected cue card titled "${cueCardRef.current.title}":\n${cueCardRef.current.prompt}\nGive one minute to prepare and invite a long turn.`
+          : `The candidate has completed five Part 1 questions. Transition naturally to Part 2, randomly choose a fresh IELTS cue-card topic about ${topicRef.current}, and present it with three or four prompts. Give one minute to prepare and invite a long turn.`
       } else examinerCue = `The candidate answered: ${text}\nAsk the next distinct Part 1 question related to ${topicRef.current}. Ask one question only.`
     } else if (phase === 'full-part2') {
       phaseRef.current = 'full-part2-followup'
-      examinerCue = `The candidate has completed the Part 2 long turn. Ask one brief, relevant follow-up question about ${topicRef.current}.`
+      examinerCue = `The candidate has completed the Part 2 long turn. Ask one brief, relevant follow-up question about ${cueCardRef.current?.title ?? topicRef.current}.`
     } else if (phase === 'full-part2-followup') {
       phaseRef.current = 'full-part3'
       candidateAnswersRef.current = 0
       examinerCue = `Transition naturally to Part 3. Ask the first abstract discussion question connected to ${topicRef.current}. Ask one question only.`
     } else if (phase === 'full-part3') {
-      if (candidateAnswersRef.current >= 4) {
+      if (candidateAnswersRef.current >= 5) {
         phaseRef.current = 'ending'
         examinerCue = 'That completes the Part 3 discussion and the full test. Thank the candidate and say the practice test is complete.'
       } else examinerCue = `The candidate answered: ${text}\nAsk the next distinct Part 3 discussion question related to ${topicRef.current}. Ask one question only.`
@@ -344,42 +378,51 @@ export function useAiToAiSimulation(username: string, apiKey: string) {
         if (activeAudioStartRef.current === null) activeAudioStartRef.current = startAt
         pendingAudioRef.current += 1
         pcmChunksRef.current.push(new Uint8Array(pcm).slice())
-        turnAudioDurationSecondsRef.current += pcm.byteLength / 48000
+        turnAudioDurationSecondsRef.current += buffer.duration
         updateCurrentTurn('')
         scheduledSourcesRef.current.push(source)
         source.onended = () => {
           scheduledSourcesRef.current = scheduledSourcesRef.current.filter((scheduled) => scheduled !== source)
           pendingAudioRef.current = Math.max(0, pendingAudioRef.current - 1)
-          void handleTurnComplete()
+          if (finishAfterAudioRef.current && pendingAudioRef.current === 0 && activeRef.current) {
+            finishAfterAudioRef.current = false
+            void finishRef.current('completed')
+          }
         }
         source.start(startAt)
       } catch (caughtError) {
-        console.error('Unable to play Gemini Live simulation audio.', caughtError)
+        console.error('Unable to play Speakia AI Live simulation audio.', caughtError)
         setError('Audio playback failed. The simulation will continue with its transcript.')
       }
     }
 
     if (content.turnComplete) {
       turnCompleteRef.current = true
+      // Start the next response while this turn's scheduled audio plays; nextAudioTimeRef preserves playback order.
       void handleTurnComplete()
     }
   }
 
-  async function startSimulation(selectedPart: AiSimulationPart, selectedTopic: string) {
+  async function startSimulation(selectedPart: AiSimulationPart, selectedTopic: string, openingPrompt?: string, transcriptGuide?: string, selectedCueCard?: SimulationCueCard, templateId?: string, templateTitle?: string) {
     if (stateRef.current !== 'idle' || activeRef.current) return
     setError('')
     if (!apiKey.trim()) {
-      setError('Add your Gemini API key in Settings before starting an AI simulation.')
+      setError('Add your Speakia AI key in Settings before starting an AI simulation.')
       return
     }
-    const normalizedTopic = selectedTopic.trim().slice(0, 120) || 'everyday life and personal experiences'
+    const normalizedTopic = selectedTopic.trim().slice(0, 120)
+      || selectedCueCard?.title.slice(0, 120)
+      || 'everyday life and personal experiences'
     const simulationId = crypto.randomUUID()
     const startDate = new Date()
     sessionIdRef.current = simulationId
+    templateIdRef.current = templateId ?? ''
+    templateTitleRef.current = templateTitle ?? ''
     startedAtRef.current = startDate.toISOString()
     startedTimeRef.current = startDate.getTime()
     partRef.current = selectedPart
     topicRef.current = normalizedTopic
+    cueCardRef.current = selectedCueCard
     phaseRef.current = selectedPart === 'full'
       ? 'full-part1'
       : selectedPart === 'part2'
@@ -402,21 +445,21 @@ export function useAiToAiSimulation(username: string, apiKey: string) {
       audioContextRef.current = audioContext
       await audioContext.resume()
       const client = new GoogleGenAI({ apiKey: apiKey.trim() })
-      const model = 'gemini-3.8-live'
+      const model = getProdiaLiveModel()
       const connect = (role: 'examiner' | 'candidate', voiceName: string) => client.live.connect({
         model,
         config: {
           responseModalities: [Modality.AUDIO],
           outputAudioTranscription: {},
           systemInstruction: role === 'examiner'
-            ? examinerInstructions(selectedPart, normalizedTopic)
-            : candidateInstructions(selectedPart, normalizedTopic),
+            ? examinerInstructions(selectedPart, normalizedTopic, selectedCueCard, transcriptGuide)
+            : candidateInstructions(selectedPart, normalizedTopic, selectedCueCard, transcriptGuide),
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } },
         },
         callbacks: {
           onmessage: (message) => handleServerMessage(role, message),
           onerror: (event) => {
-            console.error(`Gemini Live ${role} simulation failed.`, event)
+            console.error(`Speakia AI Live ${role} simulation failed.`, event)
             setError(`The AI ${role} connection failed. Check the API key, model access, and network.`)
             void finishRef.current('stopped')
           },
@@ -448,7 +491,7 @@ export function useAiToAiSimulation(username: string, apiKey: string) {
       nextAudioTimeRef.current = audioContext.currentTime
       setCurrentState('live')
       examinerSession.sendClientContent({
-        turns: [{ role: 'user', parts: [{ text: initialExaminerPrompt(selectedPart, normalizedTopic) }] }],
+        turns: [{ role: 'user', parts: [{ text: openingPrompt?.trim() || initialExaminerPrompt(selectedPart, normalizedTopic, selectedCueCard) }] }],
         turnComplete: true,
       })
     } catch (caughtError) {
@@ -456,6 +499,14 @@ export function useAiToAiSimulation(username: string, apiKey: string) {
       setError(caughtError instanceof Error ? caughtError.message : 'The AI-to-AI simulation could not be started.')
       await finishRef.current('stopped')
     }
+  }
+
+  function savePracticeRecord(record: AiSimulationRecord): boolean {
+    const updated = [record, ...recordsRef.current.filter((item) => item.id !== record.id)]
+    if (!saveAiSimulations(username, updated)) return false
+    recordsRef.current = updated
+    setRecords(updated)
+    return true
   }
 
   return {
@@ -470,6 +521,7 @@ export function useAiToAiSimulation(username: string, apiKey: string) {
     error,
     setError,
     startSimulation,
+    savePracticeRecord,
     stopSimulation: () => void finishRef.current('stopped'),
   }
 }

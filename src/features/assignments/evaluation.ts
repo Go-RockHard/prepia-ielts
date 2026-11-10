@@ -1,4 +1,4 @@
-import { GoogleGenAI } from '@google/genai'
+import { GoogleGenAI } from '@/lib/geminiClient'
 import type { AssignmentEvaluationModel, AssignmentPerformanceReport, CoachAssignment } from './types'
 
 export interface AssignmentSubmission {
@@ -53,40 +53,40 @@ function parseReport(
   try {
     value = JSON.parse(responseText.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''))
   } catch (error) {
-    console.error('Gemini returned invalid assignment evaluation JSON.', error)
-    throw new Error('Gemini returned an unreadable assignment report. Please submit again.')
+    console.error('Speakia AI returned invalid assignment evaluation JSON.', error)
+    throw new Error('Speakia AI returned an unreadable assignment report. Please submit again.')
   }
   if (!isRecord(value)
     || typeof value.summary !== 'string'
     || !Array.isArray(value.strengths) || !Array.isArray(value.weaknesses)
     || !Array.isArray(value.metrics) || !Array.isArray(value.improvementPlan)
     || (value.transcript !== undefined && typeof value.transcript !== 'string')) {
-    throw new Error('Gemini returned an incomplete assignment report. Please submit again.')
+    throw new Error('Speakia AI returned an incomplete assignment report. Please submit again.')
   }
   const textList = (list: unknown, label: string): string[] => {
     if (!Array.isArray(list) || list.length > 8 || !list.every((item) => typeof item === 'string' && item.trim())) {
-      throw new Error(`Gemini returned invalid ${label} in the assignment report.`)
+      throw new Error(`Speakia AI returned invalid ${label} in the assignment report.`)
     }
     return list.map((item) => (item as string).trim())
   }
-  if (value.summary.length > 1200 || !value.summary.trim()) throw new Error('Gemini returned an invalid report summary.')
+  if (value.summary.length > 1200 || !value.summary.trim()) throw new Error('Speakia AI returned an invalid report summary.')
   const strengths = textList(value.strengths, 'strengths')
   const weaknesses = textList(value.weaknesses, 'weaknesses')
   const improvementPlan = textList(value.improvementPlan, 'improvement plan')
   if (strengths.length < 2 || improvementPlan.length < 3) {
-    throw new Error('Gemini returned an incomplete assignment report.')
+    throw new Error('Speakia AI returned an incomplete assignment report.')
   }
   const metrics = value.metrics.map((metric) => {
     if (!isRecord(metric) || typeof metric.name !== 'string' || typeof metric.evidence !== 'string'
       || typeof metric.score !== 'number' || !Number.isFinite(metric.score) || metric.score < 0 || metric.score > 100) {
-      throw new Error('Gemini returned an invalid assignment performance metric.')
+      throw new Error('Speakia AI returned an invalid assignment performance metric.')
     }
     const name = metric.name.trim().slice(0, 80)
     const evidence = metric.evidence.trim().slice(0, 600)
-    if (!name || !evidence) throw new Error('Gemini returned an incomplete assignment performance metric.')
+    if (!name || !evidence) throw new Error('Speakia AI returned an incomplete assignment performance metric.')
     return { name, score: Math.round(metric.score), evidence }
   })
-  if (metrics.length < 3 || metrics.length > 6) throw new Error('Gemini did not return the required assignment performance metrics.')
+  if (metrics.length < 3 || metrics.length > 6) throw new Error('Speakia AI did not return the required assignment performance metrics.')
   return {
     model,
     evaluatedAt: new Date().toISOString(),
@@ -123,7 +123,7 @@ export async function evaluateAssignmentSubmission(
   assignment: CoachAssignment,
   submission: AssignmentSubmission,
 ): Promise<AssignmentPerformanceReport> {
-  if (!apiKey.trim()) throw new Error('Add your Gemini API key in Settings before submitting an assignment.')
+  if (!apiKey.trim()) throw new Error('Add your Speakia AI API key in Settings before submitting an assignment.')
   const text = submission.text.trim()
   if (text.length > 12000) throw new Error('Keep pasted assignment text under 12,000 characters.')
   if (!text && !submission.file) throw new Error('Add your written response or attach a submission file.')
@@ -146,7 +146,7 @@ export async function evaluateAssignmentSubmission(
         config: { displayName: submission.file.name, mimeType },
       })
       uploadedFileName = uploaded.name
-      if (!uploaded.uri) throw new Error('Gemini uploaded the submission but did not return a usable file URI.')
+      if (!uploaded.uri) throw new Error('Speakia AI uploaded the submission but did not return a usable file URI.')
       parts.push({ fileData: { fileUri: uploaded.uri, mimeType: uploaded.mimeType ?? mimeType } })
     }
     if (text) parts.unshift({ text: `Learner's written notes or transcript, if provided:\n${text}` })
@@ -158,7 +158,7 @@ export async function evaluateAssignmentSubmission(
       config: { temperature: 0.2, responseMimeType: 'application/json' },
     })
     responseText = response.text?.trim()
-    if (!responseText) throw new Error('Gemini returned an empty assignment report.')
+    if (!responseText) throw new Error('Speakia AI returned an empty assignment report.')
   } catch (error) {
     requestError = error
   } finally {
@@ -166,8 +166,8 @@ export async function evaluateAssignmentSubmission(
       try {
         await client.files.delete({ name: uploadedFileName })
       } catch (error) {
-        console.warn('Unable to remove the assignment submission from Gemini file storage.', error)
-        cleanupWarning = ' Gemini could not confirm deletion of the uploaded submission; check your Google AI file storage.'
+        console.warn('Unable to remove the assignment submission from Speakia AI file storage.', error)
+        cleanupWarning = ' Speakia AI could not confirm deletion of the uploaded submission; check your your AI provider AI file storage.'
       }
     }
   }
@@ -178,7 +178,7 @@ export async function evaluateAssignmentSubmission(
     }
     throw requestError
   }
-  if (!responseText) throw new Error('Gemini returned no assignment report.')
+  if (!responseText) throw new Error('Speakia AI returned no assignment report.')
   const submissionType = submission.file
     ? (mimeTypeFor(submission.file, assignment.mode).startsWith('audio/') ? 'audio' : 'document')
     : 'text'

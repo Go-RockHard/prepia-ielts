@@ -46,7 +46,7 @@ export function AssignmentPage({
   onSubmit: (assignment: CoachAssignment, report: AssignmentPerformanceReport) => void
 }) {
   const [pageError, setPageError] = useState('')
-  const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null)
+  const [expandedHistoryId, setExpandedHistoryId] = useState<string | null | undefined>(undefined)
   const [evaluationModel, setEvaluationModel] = useState<AssignmentEvaluationModel>(loadEvaluationModel)
   function changeEvaluationModel(value: string) {
     const model = ASSISTANT_MODELS.find((item) => item.id === value)
@@ -62,6 +62,7 @@ export function AssignmentPage({
   const tomorrowAssignment = assignments.find((assignment) => assignment.assignedFor === getTomorrowDate())
   const pastAssignments = assignments.filter((assignment) => assignment.id !== tomorrowAssignment?.id)
     .sort((first, second) => second.assignedFor.localeCompare(first.assignedFor))
+  const visibleExpandedHistoryId = expandedHistoryId === undefined ? pastAssignments[0]?.id ?? null : expandedHistoryId
 
   async function requestAssignment() {
     setPageError('')
@@ -94,7 +95,7 @@ export function AssignmentPage({
         <div className="assignment-section-heading"><div><p className="section-kicker">UP NEXT</p><h2 id="tomorrow-assignment-heading">Tomorrow’s assignment</h2></div><span className="assignment-date"><CalendarDays size={15} /> {formatDate(getTomorrowDate())}</span></div>
         {tomorrowAssignment
           ? <AssignmentCard assignment={tomorrowAssignment} onComplete={onComplete} onStart={onStart} apiKey={apiKey} onOpenSettings={onOpenSettings} model={evaluationModel} onModelChange={changeEvaluationModel} onSubmit={onSubmit} />
-          : <Card className="assignment-empty"><span className="assignment-empty-icon"><Target size={22} /></span><h3>Your next practice is ready when you are</h3><p>Ask Speakia to review your progress and choose one activity that fits your IELTS speaking goals.</p><Button className="start-button" onClick={() => void requestAssignment()} disabled={busy}><Sparkles size={15} /> {busy ? 'Choosing your activity…' : 'Choose tomorrow’s activity'}</Button></Card>}
+          : <Card className="assignment-empty"><span className="assignment-empty-icon"><Target size={18} /></span><div><h3>Your next practice is ready when you are</h3><p>Let Speakia choose a focused activity based on your recent practice and goals.</p></div></Card>}
       </section>
 
       <section className="assignment-section" aria-labelledby="assignment-history-heading">
@@ -106,9 +107,9 @@ export function AssignmentPage({
               <div className="assignment-history-copy"><strong>{assignment.title}</strong><p>{formatDate(assignment.assignedFor)} <span>·</span> {assignment.status === 'completed' ? 'Completed' : 'Awaiting completion'} <span>·</span> {assignment.durationMinutes} min</p></div>
               <Badge className="assignment-part-badge">{assignment.mode === 'handwritten' ? 'Handwritten' : assignment.part.replace('part', 'Part ')}</Badge>
               {assignment.report && <Badge className="assignment-report-badge"><FileText size={12} /> Report ready</Badge>}
-              <Button type="button" variant="outline" className="assignment-history-view" aria-expanded={expandedHistoryId === assignment.id} onClick={() => setExpandedHistoryId((current) => current === assignment.id ? null : assignment.id)}><Eye size={14} />{expandedHistoryId === assignment.id ? 'Hide details' : 'View details'}</Button>
+              <Button type="button" variant="outline" className="assignment-history-view" aria-expanded={visibleExpandedHistoryId === assignment.id} onClick={() => setExpandedHistoryId((current) => (current === undefined ? pastAssignments[0]?.id : current) === assignment.id ? null : assignment.id)}><Eye size={14} />{visibleExpandedHistoryId === assignment.id ? 'Hide details' : 'View details'}</Button>
             </Card>
-            {expandedHistoryId === assignment.id && <Card className="assignment-history-details"><AssignmentDetails assignment={assignment} apiKey={apiKey} onOpenSettings={onOpenSettings} model={evaluationModel} onModelChange={changeEvaluationModel} onSubmit={onSubmit} /></Card>}
+            {visibleExpandedHistoryId === assignment.id && <Card className="assignment-history-details"><AssignmentDetails assignment={assignment} apiKey={apiKey} onOpenSettings={onOpenSettings} model={evaluationModel} onModelChange={changeEvaluationModel} onSubmit={onSubmit} /></Card>}
           </div>)}</div>
           : <Card className="assignment-history-empty">Your completed and past assignments will appear here.</Card>}
       </section>
@@ -223,22 +224,22 @@ function AssignmentSubmission({
   return <section className="assignment-submission" aria-labelledby={`assignment-submit-${assignment.id}`}>
     <div className="assignment-submission-heading">
       <div><span className="section-kicker">{assignment.report ? 'SUBMIT ANOTHER ATTEMPT' : 'YOUR WORKSPACE'}</span><h4 id={`assignment-submit-${assignment.id}`}>{assignment.mode === 'handwritten' ? 'Submit your written work' : 'Submit your speaking practice'}</h4><p>{assignment.mode === 'handwritten' ? 'Upload a clear photo or PDF of your handwritten work, or paste your response.' : 'Upload your recording for multimodal speaking feedback, or paste a transcript for language-focused feedback.'}</p></div>
-      <label className="assignment-model-picker">ASSESSMENT MODEL<select value={model} onChange={(event) => onModelChange(event.target.value)} disabled={busy}>{ASSISTANT_MODELS.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
+      <label className="assignment-model-picker">ASSESSMENT MODEL<select value={model} onChange={(event) => onModelChange(event.target.value)} disabled={busy}>{ASSISTANT_MODELS.map((item) => <option key={item.id} value={item.id}>{item.label} · {item.description}</option>)}</select></label>
     </div>
     <form className="assignment-submission-form" onSubmit={(event) => void submit(event)}>
       <label className="assignment-file-picker"><Upload size={17} /><span>{file ? file.name : assignment.mode === 'handwritten' ? 'Choose a photo or PDF' : 'Choose an audio recording'}</span><small>{assignment.mode === 'handwritten' ? 'JPG, PNG, WebP, HEIC or PDF · up to 50 MB' : 'MP3, WAV, M4A, OGG, AAC, FLAC or WebM · up to 50 MB'}</small><input type="file" accept={assignment.mode === 'handwritten' ? 'image/*,.pdf' : 'audio/*'} onChange={(event) => { setFile(event.target.files?.[0] ?? null); setError('') }} /></label>
       <label className="assignment-text-entry">{assignment.mode === 'handwritten' ? 'Written response or transcription (optional with an attachment)' : 'Transcript or notes (optional with audio)'}<textarea value={text} onChange={(event) => { setText(event.target.value); setError('') }} maxLength={12000} rows={3} placeholder={assignment.mode === 'handwritten' ? 'Paste your written response here…' : 'Add a transcript or notes to help ground the review…'} /></label>
       {assignment.mode === 'speaking' && <p className="assignment-submission-note">Text-only submissions can be reviewed for language and task content, but not pronunciation, fluency, or delivery.</p>}
-      {!apiKey.trim() && <div className="assignment-key-prompt"><span>Add your Gemini API key to request an assessment.</span><Button type="button" variant="outline" size="sm" onClick={onOpenSettings}>Open Settings</Button></div>}
+      {!apiKey.trim() && <div className="assignment-key-prompt"><span>Add your Speakia AI key to request an assessment.</span><Button type="button" variant="outline" size="sm" onClick={onOpenSettings}>Open Settings</Button></div>}
       {error && <p className="assignment-submission-error" role="alert">{error}</p>}
-      <div className="assignment-submit-actions"><span>Gemini-generated practice feedback · not an official IELTS score</span><Button className="start-button" type="submit" disabled={busy || !apiKey.trim() || (!file && !text.trim())}>{busy ? <><LoaderCircle size={15} className="assistant-spin" /> Assessing…</> : <><Upload size={15} /> Submit for assessment</>}</Button></div>
+      <div className="assignment-submit-actions"><span>Speakia practice feedback · not an official IELTS score</span><Button className="start-button" type="submit" disabled={busy || !apiKey.trim() || (!file && !text.trim())}>{busy ? <><LoaderCircle size={15} className="assistant-spin" /> Assessing…</> : <><Upload size={15} /> Submit for assessment</>}</Button></div>
     </form>
   </section>
 }
 
 function AssignmentReport({ report }: { report: AssignmentPerformanceReport }) {
   return <section className="assignment-performance-report" aria-label="Assignment performance report">
-    <div className="assignment-report-heading"><div><span className="section-kicker">AI PERFORMANCE REPORT</span><h4>Submission review</h4><p>{report.submissionName} · {new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(report.evaluatedAt))} · {ASSISTANT_MODELS.find((item) => item.id === report.model)?.label ?? report.model}</p></div><Badge><CheckCircle2 size={12} /> Evaluated</Badge></div>
+    <div className="assignment-report-heading"><div><span className="section-kicker">AI PERFORMANCE REPORT</span><h4>Submission review</h4><p>{report.submissionName} · {new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(report.evaluatedAt))} · {ASSISTANT_MODELS.find((item) => item.id === report.model)?.label ?? 'Prodia assessment model'}</p></div><Badge><CheckCircle2 size={12} /> Evaluated</Badge></div>
     <p className="assignment-report-summary">{report.summary}</p>
     <div className="assignment-report-grid">
       <div className="assignment-report-panel"><h5><CheckCircle2 size={14} /> Strengths</h5><ul>{report.strengths.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul></div>

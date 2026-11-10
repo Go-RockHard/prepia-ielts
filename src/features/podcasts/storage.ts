@@ -1,4 +1,4 @@
-import { PODCAST_LANGUAGES, PODCAST_SCRIPT_MODELS, PODCAST_TTS_MODELS, type SpeakiaPodcast } from './types'
+import { PODCAST_LANGUAGES, PODCAST_SCRIPT_MODELS, PODCAST_TTS_MODELS, type PodcastProduct, type SpeakiaPodcast } from './types'
 
 const STORAGE_KEY_PREFIX = 'speakia-podcasts-v1:'
 
@@ -21,21 +21,33 @@ function isPodcast(value: unknown): value is SpeakiaPodcast {
     && (podcast.playbackMode === undefined || podcast.playbackMode === 'recorded' || podcast.playbackMode === 'live')
     && (podcast.audioAvailable === undefined || typeof podcast.audioAvailable === 'boolean')
     && (podcast.liveAudioAvailable === undefined || typeof podcast.liveAudioAvailable === 'boolean')
+    && (podcast.hosts === undefined || (
+      Array.isArray(podcast.hosts)
+      && podcast.hosts.length === 2
+      && podcast.hosts.every((host) => typeof host === 'object'
+        && host !== null
+        && typeof host.name === 'string'
+        && host.name.trim().length > 0
+        && host.name.length <= 40
+        && (host.gender === 'female' || host.gender === 'male'))
+    ))
     && Array.isArray(podcast.turns)
     && (podcast.turns.length >= 4 || (podcast.playbackMode === 'live' && podcast.turns.length === 0))
     && podcast.turns.every((turn) => typeof turn === 'object'
       && turn !== null
-      && (turn.speaker === 'Aisha' || turn.speaker === 'Noah')
+      && typeof turn.speaker === 'string'
+      && turn.speaker.trim().length > 0
+      && turn.speaker.length <= 40
       && typeof turn.text === 'string')
 }
 
-function storageKey(username: string): string {
-  return `${STORAGE_KEY_PREFIX}${username.trim().toLocaleLowerCase()}`
+function storageKey(username: string, product: PodcastProduct): string {
+  return `${product}-podcasts-v1:${username.trim().toLocaleLowerCase()}`
 }
 
-export function loadPodcasts(username: string): SpeakiaPodcast[] {
+export function loadPodcasts(username: string, product: PodcastProduct = 'speakia'): SpeakiaPodcast[] {
   try {
-    const stored = localStorage.getItem(storageKey(username))
+    const stored = localStorage.getItem(product === 'speakia' ? `${STORAGE_KEY_PREFIX}${username.trim().toLocaleLowerCase()}` : storageKey(username, product))
     if (!stored) return []
     const parsed: unknown = JSON.parse(stored)
     if (!Array.isArray(parsed)) throw new Error('Saved Speakia Podcasts archive is not a list.')
@@ -50,9 +62,9 @@ export function loadPodcasts(username: string): SpeakiaPodcast[] {
   }
 }
 
-export function savePodcasts(username: string, podcasts: SpeakiaPodcast[]): boolean {
+export function savePodcasts(username: string, podcasts: SpeakiaPodcast[], product: PodcastProduct = 'speakia'): boolean {
   try {
-    localStorage.setItem(storageKey(username), JSON.stringify(podcasts))
+    localStorage.setItem(product === 'speakia' ? `${STORAGE_KEY_PREFIX}${username.trim().toLocaleLowerCase()}` : storageKey(username, product), JSON.stringify(podcasts))
     return true
   } catch (error) {
     console.error('Unable to save the Speakia Podcasts archive.', error)

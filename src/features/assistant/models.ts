@@ -1,14 +1,12 @@
-export const ASSISTANT_MODELS = [
-  { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
-  { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro Preview' },
-  { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash Lite' },
-  { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite' },
-] as const
+import { DEFAULT_LIGHTWEIGHT_TEXT_MODEL, GEMINI_TEXT_MODELS, type GeminiTextModel } from '@/lib/geminiModels'
 
-export type AssistantModel = typeof ASSISTANT_MODELS[number]['id']
+export const ASSISTANT_MODELS = GEMINI_TEXT_MODELS
+
+export type AssistantModel = GeminiTextModel
 
 export const DEFAULT_ASSISTANT_CHAT_MODEL: AssistantModel = 'gemini-3.8-flash'
 export const DEFAULT_ASSISTANT_TOOL_MODEL: AssistantModel = 'gemini-3.8-flash'
+export const DEFAULT_TEMPLATE_GENERATION_MODEL = DEFAULT_LIGHTWEIGHT_TEXT_MODEL
 
 export const GEMINI_LIVE_VOICES = [
   { id: 'Aoede', label: 'Aoede · expressive' },

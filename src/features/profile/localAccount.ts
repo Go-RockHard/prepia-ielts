@@ -1,19 +1,30 @@
+import { isPlacementAssessment, type PlacementAssessment } from '@/features/placement/types'
+
 const DATABASE_NAME = 'speakia-user-database'
 const DATABASE_VERSION = 1
 const ACCOUNT_STORE = 'accounts'
 const PROFILE_STORE = 'profiles'
 const SESSION_KEY = 'speakia-local-session'
+const REMEMBERED_USERNAME_KEY = 'prodia-remembered-username'
 const REQUIRED_LOCAL_PASSWORD = 'letsspeakia'
 
 export interface UserProfile {
   username: string
   displayName: string
   testDate: string
+  speakingTestDate: string
+  writingTestDate: string
   targetBand: string
+  speakingTargetBand: string
+  writingTargetBand: string
   testType: 'Academic' | 'General Training'
   location: string
   firstLanguage: string
   studyGoal: string
+  speakingStudyGoal: string
+  writingStudyGoal: string
+  speakingPlacementAssessment?: PlacementAssessment
+  writingPlacementAssessment?: PlacementAssessment
 }
 
 interface LocalAccount {
@@ -113,11 +124,17 @@ export async function createLocalAccount(usernameInput: string, password: string
     username,
     displayName: username,
     testDate: '',
+    speakingTestDate: '',
+    writingTestDate: '',
     targetBand: '',
+    speakingTargetBand: '',
+    writingTargetBand: '',
     testType: 'Academic',
     location: '',
     firstLanguage: '',
     studyGoal: '',
+    speakingStudyGoal: '',
+    writingStudyGoal: '',
   }
   const database = await openUserDatabase()
   try {
@@ -157,7 +174,34 @@ export async function loadUserProfile(username: string): Promise<UserProfile | n
   try {
     return await new Promise((resolve, reject) => {
       const request = database.transaction(PROFILE_STORE, 'readonly').objectStore(PROFILE_STORE).get(username)
-      request.onsuccess = () => resolve((request.result as UserProfile | undefined) ?? null)
+      request.onsuccess = () => {
+        const stored = request.result as Partial<UserProfile> | undefined
+        if (!stored) {
+          resolve(null)
+          return
+        }
+        const speakingTestDate = stored.speakingTestDate ?? stored.testDate ?? ''
+        const speakingTargetBand = stored.speakingTargetBand ?? stored.targetBand ?? ''
+        const speakingStudyGoal = stored.speakingStudyGoal ?? stored.studyGoal ?? ''
+        resolve({
+          username: stored.username ?? username,
+          displayName: stored.displayName ?? username,
+          testDate: speakingTestDate,
+          speakingTestDate,
+          writingTestDate: stored.writingTestDate ?? stored.testDate ?? '',
+          targetBand: speakingTargetBand,
+          speakingTargetBand,
+          writingTargetBand: stored.writingTargetBand ?? '',
+          testType: stored.testType === 'General Training' ? 'General Training' : 'Academic',
+          location: stored.location ?? '',
+          firstLanguage: stored.firstLanguage ?? '',
+          studyGoal: speakingStudyGoal,
+          speakingStudyGoal,
+          writingStudyGoal: stored.writingStudyGoal ?? '',
+          speakingPlacementAssessment: isPlacementAssessment(stored.speakingPlacementAssessment) && stored.speakingPlacementAssessment.skill === 'speaking' ? stored.speakingPlacementAssessment : undefined,
+          writingPlacementAssessment: isPlacementAssessment(stored.writingPlacementAssessment) && stored.writingPlacementAssessment.skill === 'writing' ? stored.writingPlacementAssessment : undefined,
+        })
+      }
       request.onerror = () => reject(request.error ?? new Error('Unable to load the local profile.'))
     })
   } finally {
@@ -166,11 +210,17 @@ export async function loadUserProfile(username: string): Promise<UserProfile | n
 }
 
 export async function saveUserProfile(profile: UserProfile): Promise<void> {
+  const normalizedProfile: UserProfile = {
+    ...profile,
+    testDate: profile.speakingTestDate,
+    targetBand: profile.speakingTargetBand,
+    studyGoal: profile.speakingStudyGoal,
+  }
   const database = await openUserDatabase()
   try {
     await new Promise<void>((resolve, reject) => {
       const transaction = database.transaction(PROFILE_STORE, 'readwrite')
-      transaction.objectStore(PROFILE_STORE).put(profile)
+      transaction.objectStore(PROFILE_STORE).put(normalizedProfile)
       transaction.oncomplete = () => resolve()
       transaction.onerror = () => reject(transaction.error ?? new Error('Unable to save the local profile.'))
       transaction.onabort = () => reject(transaction.error ?? new Error('Saving the local profile was aborted.'))
@@ -180,14 +230,32 @@ export async function saveUserProfile(profile: UserProfile): Promise<void> {
   }
 }
 
-export function saveLocalSession(username: string): void {
-  sessionStorage.setItem(SESSION_KEY, username)
+export function saveLocalSession(username: string, rememberMe = false): void {
+  sessionStorage.removeItem(SESSION_KEY)
+  localStorage.removeItem(SESSION_KEY)
+  if (rememberMe) {
+    localStorage.setItem(SESSION_KEY, username)
+    localStorage.setItem(REMEMBERED_USERNAME_KEY, username)
+  } else {
+    sessionStorage.setItem(SESSION_KEY, username)
+    localStorage.removeItem(REMEMBERED_USERNAME_KEY)
+  }
 }
 
 export function readLocalSession(): string {
-  return sessionStorage.getItem(SESSION_KEY) ?? ''
+  return localStorage.getItem(SESSION_KEY) ?? sessionStorage.getItem(SESSION_KEY) ?? ''
+}
+
+export function readRememberedUsername(): string {
+  try {
+    return localStorage.getItem(REMEMBERED_USERNAME_KEY) ?? ''
+  } catch (error) {
+    console.error('Unable to read the remembered Prodia username.', error)
+    return ''
+  }
 }
 
 export function clearLocalSession(): void {
   sessionStorage.removeItem(SESSION_KEY)
+  localStorage.removeItem(SESSION_KEY)
 }

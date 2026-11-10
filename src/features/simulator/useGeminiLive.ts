@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { GoogleGenAI, Modality, ThinkingLevel, type FunctionCall, type FunctionResponse, type LiveServerMessage, type Session, type Tool } from '@google/genai'
+import { Modality, ThinkingLevel, type FunctionCall, type FunctionResponse, type LiveServerMessage, type Session, type Tool, type ToolConfig } from '@google/genai'
+import { GoogleGenAI } from '@/lib/geminiClient'
+import { getProdiaLiveModel, type ProdiaLiveModel } from '@/lib/geminiModels'
+import { reportGeminiQuota } from '@/lib/geminiQuota'
 import { mergeTranscriptText } from './transcript'
 import type { TranscriptEntry } from './types'
 
@@ -7,26 +10,37 @@ interface UseGeminiLiveOptions {
   apiKey: string
   systemInstruction: string
   voiceName?: string
+  liveModel?: ProdiaLiveModel
   thinkingLevel?: ThinkingLevel
   openingPrompt?: string
   tools?: Tool[]
+  toolConfig?: ToolConfig
   onToolCall?: (functionCalls: FunctionCall[]) => Promise<FunctionResponse[]>
+  onCandidateTranscript?: (text: string) => void
 }
 
 interface UseGeminiLiveResult {
   connected: boolean
   connecting: boolean
+  micMuted: boolean
   status: string
   error: string
   transcript: TranscriptEntry[]
   candidateDraft: string
   activeExaminerTurnId: string | null
   examinerSpeechElapsedSeconds: number
+  examinerSpeechDurationSeconds: number
   sendText: (text: string) => void
   sendInstruction: (text: string) => void
   sendAudio: (audio: Blob, mediaInstruction: string) => Promise<void>
-  start: () => Promise<boolean>
+  start: (overrides?: LiveSessionStartOverrides) => Promise<boolean>
+  toggleMicMuted: () => void
   stop: () => Promise<{ recording: Blob; transcript: TranscriptEntry[] }>
+}
+
+interface LiveSessionStartOverrides {
+  systemInstruction?: string
+  openingPrompt?: string
 }
 
 function float32ToPcmBase64(samples: Float32Array): string {
@@ -110,21 +124,26 @@ function audioSampleRate(mimeType: string | undefined): number {
   return rate ? Number(rate) : 24000
 }
 
-export function useGeminiLive({ apiKey, systemInstruction, openingPrompt = 'Please begin the IELTS Speaking practice test now.', voiceName = 'Aoede', thinkingLevel, tools, onToolCall }: UseGeminiLiveOptions): UseGeminiLiveResult {
+const LIVE_SETUP_TIMEOUT_MS = 30_000
+
+export function useGeminiLive({ apiKey, systemInstruction, openingPrompt = 'Please begin the IELTS Speaking practice test now.', voiceName = 'Aoede', liveModel, thinkingLevel, tools, toolConfig, onToolCall, onCandidateTranscript }: UseGeminiLiveOptions): UseGeminiLiveResult {
   const [connected, setConnected] = useState(false)
   const [connecting, setConnecting] = useState(false)
+  const [micMuted, setMicMuted] = useState(false)
   const [status, setStatus] = useState('')
   const [error, setError] = useState('')
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([])
   const [candidateDraft, setCandidateDraft] = useState('')
   const [activeExaminerTurnId, setActiveExaminerTurnId] = useState<string | null>(null)
   const [examinerSpeechElapsedSeconds, setExaminerSpeechElapsedSeconds] = useState(0)
+  const [examinerSpeechDurationSeconds, setExaminerSpeechDurationSeconds] = useState(0)
   const transcriptRef = useRef<TranscriptEntry[]>([])
   const candidateDraftRef = useRef('')
   const suppressInputTranscriptionRef = useRef(false)
   const transcriptCanMergeRef = useRef(false)
   const sessionRef = useRef<Session | null>(null)
   const micStreamRef = useRef<MediaStream | null>(null)
+  const micMutedRef = useRef(false)
   const inputContextRef = useRef<AudioContext | null>(null)
   const outputContextRef = useRef<AudioContext | null>(null)
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null)
@@ -135,21 +154,24 @@ export function useGeminiLive({ apiKey, systemInstruction, openingPrompt = 'Plea
   const scheduledSourcesRef = useRef<AudioBufferSourceNode[]>([])
   const nextAudioTimeRef = useRef(0)
   const examinerSpeechStartRef = useRef<number | null>(null)
+  const examinerSpeechDurationRef = useRef(0)
   const candidateAudioChunksRef = useRef<Uint8Array[]>([])
   const candidateSilenceSamplesRef = useRef(0)
-  const pendingCandidateAudioRef = useRef<Blob[]>([])
+  const pendingCandidateAudioRef = useRef<{ audio: Blob; audioOrder: number }[]>([])
   const pendingCandidateTranscriptIdsRef = useRef<string[]>([])
   const examinerAudioChunksRef = useRef<Uint8Array[]>([])
+  const examinerAudioOrderRef = useRef<number | null>(null)
   const examinerAudioSampleRateRef = useRef(24000)
   const examinerTranscriptIdRef = useRef<string | null>(null)
-  const pendingExaminerAudioRef = useRef<Blob[]>([])
+  const pendingExaminerAudioRef = useRef<{ audio: Blob; audioOrder: number }[]>([])
+  const candidateAudioOrderRef = useRef<number | null>(null)
   const examinerAudioCompleteRef = useRef(false)
   const examinerTranscriptCompleteRef = useRef(false)
   const audioContextCtor = window.AudioContext
 
-  const attachAudio = useCallback((turnId: string, audio: Blob) => {
+  const attachAudio = useCallback((turnId: string, audio: Blob, audioOrder: number) => {
     const updated = transcriptRef.current.map((turn) => (
-      turn.id === turnId ? { ...turn, audio } : turn
+      turn.id === turnId ? { ...turn, audio, audioOrder } : turn
     ))
     transcriptRef.current = updated
     setTranscript(updated)
@@ -157,16 +179,20 @@ export function useGeminiLive({ apiKey, systemInstruction, openingPrompt = 'Plea
 
   const pairCandidateAudio = useCallback(() => {
     while (pendingCandidateAudioRef.current.length && pendingCandidateTranscriptIdsRef.current.length) {
-      const audio = pendingCandidateAudioRef.current.shift()
+      const segment = pendingCandidateAudioRef.current.shift()
       const turnId = pendingCandidateTranscriptIdsRef.current.shift()
-      if (audio && turnId) attachAudio(turnId, audio)
+      if (segment && turnId) attachAudio(turnId, segment.audio, segment.audioOrder)
     }
   }, [attachAudio])
 
   const finishCandidateAudio = useCallback(() => {
     if (!candidateAudioChunksRef.current.length) return
-    pendingCandidateAudioRef.current.push(pcmToWavBlob(candidateAudioChunksRef.current, 16000))
+    pendingCandidateAudioRef.current.push({
+      audio: pcmToWavBlob(candidateAudioChunksRef.current, 16000),
+      audioOrder: candidateAudioOrderRef.current ?? performance.now(),
+    })
     candidateAudioChunksRef.current = []
+    candidateAudioOrderRef.current = null
     candidateSilenceSamplesRef.current = 0
     pairCandidateAudio()
   }, [pairCandidateAudio])
@@ -175,8 +201,10 @@ export function useGeminiLive({ apiKey, systemInstruction, openingPrompt = 'Plea
     if (examinerAudioChunksRef.current.length) {
       const audio = pcmToWavBlob(examinerAudioChunksRef.current, examinerAudioSampleRateRef.current)
       examinerAudioChunksRef.current = []
-      if (examinerTranscriptIdRef.current) attachAudio(examinerTranscriptIdRef.current, audio)
-      else pendingExaminerAudioRef.current.push(audio)
+      const audioOrder = examinerAudioOrderRef.current ?? performance.now()
+      examinerAudioOrderRef.current = null
+      if (examinerTranscriptIdRef.current) attachAudio(examinerTranscriptIdRef.current, audio, audioOrder)
+      else pendingExaminerAudioRef.current.push({ audio, audioOrder })
     }
     examinerAudioCompleteRef.current = true
   }, [attachAudio])
@@ -184,11 +212,11 @@ export function useGeminiLive({ apiKey, systemInstruction, openingPrompt = 'Plea
   const pairPendingExaminerAudio = useCallback(() => {
     const turnId = examinerTranscriptIdRef.current
     if (!turnId) return
-    const audio = pendingExaminerAudioRef.current.shift()
-    if (audio) attachAudio(turnId, audio)
+    const segment = pendingExaminerAudioRef.current.shift()
+    if (segment) attachAudio(turnId, segment.audio, segment.audioOrder)
   }, [attachAudio])
 
-  const appendTranscript = useCallback((role: TranscriptEntry['role'], text: string, source?: TranscriptEntry['source']) => {
+  const appendTranscript = useCallback((role: TranscriptEntry['role'], text: string, source?: TranscriptEntry['source'], finished = false) => {
     const trimmed = text.trim()
     if (!trimmed) return null
     const current = transcriptRef.current
@@ -196,11 +224,18 @@ export function useGeminiLive({ apiKey, systemInstruction, openingPrompt = 'Plea
     let updated: TranscriptEntry[]
     if (transcriptCanMergeRef.current && last?.role === role && last.source === source) {
       const mergedText = mergeTranscriptText(last.text, trimmed)
-      if (mergedText === last.text) return last.id ?? null
+      if (mergedText === last.text) {
+        if (!finished || last.finished) return last.id ?? null
+        updated = [...current]
+        updated[updated.length - 1] = { ...last, finished: true }
+        transcriptRef.current = updated
+        setTranscript(updated)
+        return last.id ?? null
+      }
       updated = [...current]
-      updated[updated.length - 1] = { ...last, text: mergedText }
+      updated[updated.length - 1] = { ...last, text: mergedText, ...(finished ? { finished: true } : {}) }
     } else {
-      updated = [...current, { id: crypto.randomUUID(), role, text: trimmed, ...(source ? { source } : {}) }]
+      updated = [...current, { id: crypto.randomUUID(), role, text: trimmed, ...(source ? { source } : {}), ...(finished ? { finished: true } : {}) }]
     }
     transcriptCanMergeRef.current = true
     transcriptRef.current = updated
@@ -231,15 +266,42 @@ export function useGeminiLive({ apiKey, systemInstruction, openingPrompt = 'Plea
     examinerTranscriptIdRef.current = appendTranscript('examiner', trimmed)
     setActiveExaminerTurnId(examinerTranscriptIdRef.current)
     setExaminerSpeechElapsedSeconds(0)
+    if (examinerSpeechStartRef.current === null) {
+      examinerSpeechDurationRef.current = 0
+      setExaminerSpeechDurationSeconds(0)
+    }
     examinerTranscriptCompleteRef.current = false
     pairPendingExaminerAudio()
   }, [appendTranscript, pairPendingExaminerAudio])
+
+  const completeExaminerTurnIfReady = useCallback(() => {
+    if (!examinerAudioCompleteRef.current || !examinerTranscriptCompleteRef.current || scheduledSourcesRef.current.length) return
+    if (examinerTranscriptIdRef.current) {
+      const updated = transcriptRef.current.map((turn) => (
+        turn.id === examinerTranscriptIdRef.current ? { ...turn, finished: true } : turn
+      ))
+      transcriptRef.current = updated
+      setTranscript(updated)
+    }
+    examinerTranscriptIdRef.current = null
+    examinerAudioCompleteRef.current = false
+    examinerTranscriptCompleteRef.current = false
+    examinerSpeechStartRef.current = null
+    setActiveExaminerTurnId(null)
+    setExaminerSpeechElapsedSeconds(0)
+    examinerSpeechDurationRef.current = 0
+    setExaminerSpeechDurationSeconds(0)
+  }, [])
 
   const playAudioPart = useCallback((base64: string, mimeType?: string) => {
     const context = outputContextRef.current
     if (!context) return
     const pcm = decodeBase64(base64)
     const sampleRate = audioSampleRate(mimeType)
+    const startAt = Math.max(context.currentTime + 0.025, nextAudioTimeRef.current)
+    if (!examinerAudioChunksRef.current.length) {
+      examinerAudioOrderRef.current = performance.now() + Math.max(0, startAt - context.currentTime) * 1000
+    }
     examinerAudioCompleteRef.current = false
     examinerAudioSampleRateRef.current = sampleRate
     examinerAudioChunksRef.current.push(new Uint8Array(pcm).slice())
@@ -251,32 +313,51 @@ export function useGeminiLive({ apiKey, systemInstruction, openingPrompt = 'Plea
     const source = context.createBufferSource()
     source.buffer = audioBuffer
     source.connect(context.destination)
-    const startAt = Math.max(context.currentTime + 0.025, nextAudioTimeRef.current)
     nextAudioTimeRef.current = startAt + audioBuffer.duration
+    examinerSpeechDurationRef.current += audioBuffer.duration
+    setExaminerSpeechDurationSeconds(examinerSpeechDurationRef.current)
     if (examinerSpeechStartRef.current === null) examinerSpeechStartRef.current = startAt
     scheduledSourcesRef.current.push(source)
     source.onended = () => {
       scheduledSourcesRef.current = scheduledSourcesRef.current.filter((item) => item !== source)
+      completeExaminerTurnIfReady()
     }
     source.start(startAt)
-  }, [])
+  }, [completeExaminerTurnIfReady])
 
   useEffect(() => {
     if (!connected) return
-    const timer = window.setInterval(() => {
+    let frame = 0
+    const updateClock = () => {
       const context = outputContextRef.current
       const startAt = examinerSpeechStartRef.current
       setExaminerSpeechElapsedSeconds(context && startAt !== null
         ? Math.max(0, context.currentTime - startAt)
         : 0)
-    }, 60)
-    return () => window.clearInterval(timer)
+      frame = window.requestAnimationFrame(updateClock)
+    }
+    frame = window.requestAnimationFrame(updateClock)
+    return () => window.cancelAnimationFrame(frame)
   }, [connected])
 
   const handleMessage = useCallback((message: LiveServerMessage) => {
     const functionCalls = message.toolCall?.functionCalls
     if (functionCalls?.length) {
-      setStatus('Speakia is building your interactive lesson…')
+      const finalInput = message.serverContent?.inputTranscription
+      if (!micMutedRef.current && finalInput?.text && finalInput.finished !== false) {
+        const finalText = mergeTranscriptText(candidateDraftRef.current, finalInput.text)
+        const candidateId = appendTranscript('candidate', finalText, undefined, true)
+        if (candidateId) {
+          pendingCandidateTranscriptIdsRef.current.push(candidateId)
+          pairCandidateAudio()
+        }
+        candidateDraftRef.current = ''
+        setCandidateDraft('')
+        transcriptCanMergeRef.current = false
+        onCandidateTranscript?.(finalText)
+      }
+      const navigationCall = functionCalls.find((call) => call.name === 'navigate_speakia_page')
+      setStatus(navigationCall ? 'Opening the requested Speakia page…' : 'Speakia is preparing your request…')
       void (async () => {
         try {
           if (!onToolCall) throw new Error('This live conversation does not support that assistant tool.')
@@ -284,7 +365,7 @@ export function useGeminiLive({ apiKey, systemInstruction, openingPrompt = 'Plea
           const session = sessionRef.current
           if (!session) throw new Error('The live conversation ended before the assistant tool finished.')
           session.sendToolResponse({ functionResponses })
-          setStatus('Your lesson is ready · continue speaking or type')
+          setStatus(navigationCall ? 'Page opened · continue speaking or type' : 'Your request is ready · continue speaking or type')
         } catch (caughtError) {
           console.error('Unable to complete a Speakia Live assistant tool call.', caughtError)
           setError(caughtError instanceof Error ? caughtError.message : 'The live assistant tool could not be completed.')
@@ -299,12 +380,11 @@ export function useGeminiLive({ apiKey, systemInstruction, openingPrompt = 'Plea
               })),
             })
           } catch (responseError) {
-            console.error('Unable to return the Speakia tool error to Gemini Live.', responseError)
+            console.error('Unable to return the Speakia tool error to Speakia AI Live.', responseError)
             setError('The live assistant could not receive the lesson tool result. Please reconnect and try again.')
           }
         }
       })()
-      return
     }
     if (message.setupComplete) {
       setStatus('Live examiner connected')
@@ -318,29 +398,34 @@ export function useGeminiLive({ apiKey, systemInstruction, openingPrompt = 'Plea
       examinerTranscriptCompleteRef.current = true
       examinerSpeechStartRef.current = null
       setActiveExaminerTurnId(null)
+      examinerSpeechDurationRef.current = 0
+      setExaminerSpeechDurationSeconds(0)
       for (const source of scheduledSourcesRef.current) {
         try {
           source.stop()
         } catch (error) {
           if (!(error instanceof DOMException && error.name === 'InvalidStateError')) {
-            console.error('Unable to stop interrupted Gemini audio.', error)
+            console.error('Unable to stop interrupted Speakia AI audio.', error)
           }
         }
       }
       scheduledSourcesRef.current = []
       nextAudioTimeRef.current = outputContextRef.current?.currentTime ?? 0
+      examinerTranscriptIdRef.current = null
+      examinerAudioCompleteRef.current = false
+      examinerTranscriptCompleteRef.current = false
     }
 
     if (suppressInputTranscriptionRef.current) {
       candidateDraftRef.current = ''
       setCandidateDraft('')
-    } else if (content.inputTranscription?.text) {
+    } else if (!micMutedRef.current && content.inputTranscription?.text) {
       if (content.inputTranscription.finished === false) {
         candidateDraftRef.current = mergeTranscriptText(candidateDraftRef.current, content.inputTranscription.text)
         setCandidateDraft(candidateDraftRef.current)
       } else {
         const finalText = mergeTranscriptText(candidateDraftRef.current, content.inputTranscription.text)
-        const candidateId = appendTranscript('candidate', finalText)
+        const candidateId = appendTranscript('candidate', finalText, undefined, true)
         if (candidateId) {
           pendingCandidateTranscriptIdsRef.current.push(candidateId)
           pairCandidateAudio()
@@ -348,8 +433,9 @@ export function useGeminiLive({ apiKey, systemInstruction, openingPrompt = 'Plea
         transcriptCanMergeRef.current = false
         candidateDraftRef.current = ''
         setCandidateDraft('')
+        onCandidateTranscript?.(finalText)
       }
-    } else if (content.interimInputTranscription?.text) {
+    } else if (!micMutedRef.current && content.interimInputTranscription?.text) {
       setCandidateDraft(content.interimInputTranscription.text)
     }
     if (content.outputTranscription?.text) {
@@ -371,15 +457,8 @@ export function useGeminiLive({ apiKey, systemInstruction, openingPrompt = 'Plea
       transcriptCanMergeRef.current = false
       setStatus('Your examiner is listening')
     }
-    if (examinerAudioCompleteRef.current && examinerTranscriptCompleteRef.current) {
-      examinerTranscriptIdRef.current = null
-      examinerAudioCompleteRef.current = false
-      examinerTranscriptCompleteRef.current = false
-      examinerSpeechStartRef.current = null
-      setActiveExaminerTurnId(null)
-      setExaminerSpeechElapsedSeconds(0)
-    }
-  }, [appendExaminerTranscript, appendTranscript, finishCandidateAudio, finishExaminerAudio, onToolCall, pairCandidateAudio, playAudioPart])
+    completeExaminerTurnIfReady()
+  }, [appendExaminerTranscript, appendTranscript, completeExaminerTurnIfReady, finishCandidateAudio, finishExaminerAudio, onCandidateTranscript, onToolCall, pairCandidateAudio, playAudioPart])
 
   const cleanupAudio = useCallback(async () => {
     suppressInputTranscriptionRef.current = false
@@ -397,7 +476,7 @@ export function useGeminiLive({ apiKey, systemInstruction, openingPrompt = 'Plea
         source.stop()
       } catch (error) {
         if (!(error instanceof DOMException && error.name === 'InvalidStateError')) {
-          console.error('Unable to stop Gemini audio during cleanup.', error)
+          console.error('Unable to stop Speakia AI audio during cleanup.', error)
         }
       }
     }
@@ -411,8 +490,26 @@ export function useGeminiLive({ apiKey, systemInstruction, openingPrompt = 'Plea
   }, [])
 
   const stop = useCallback(async () => {
+    micMutedRef.current = false
+    setMicMuted(false)
     finishCandidateAudio()
     finishExaminerAudio()
+    const unpairedAudioTurns = [
+      ...pendingCandidateAudioRef.current.splice(0).map((segment) => ({ ...segment, role: 'candidate' as const })),
+      ...pendingExaminerAudioRef.current.splice(0).map((segment) => ({ ...segment, role: 'examiner' as const })),
+    ].sort((left, right) => left.audioOrder - right.audioOrder)
+    if (unpairedAudioTurns.length) {
+      const recovered = unpairedAudioTurns.map((turn) => ({
+        id: crypto.randomUUID(),
+        role: turn.role,
+        text: turn.role === 'candidate' ? '[Candidate speech captured; transcription unavailable]' : '[Examiner speech captured; transcription unavailable]',
+        audio: turn.audio,
+        audioOrder: turn.audioOrder,
+        finished: true,
+      }))
+      transcriptRef.current = [...transcriptRef.current, ...recovered]
+      setTranscript(transcriptRef.current)
+    }
     const recorder = mediaRecorderRef.current
     const recordingComplete = recorder?.state === 'recording'
       ? new Promise<void>((resolve) => {
@@ -427,6 +524,8 @@ export function useGeminiLive({ apiKey, systemInstruction, openingPrompt = 'Plea
     setConnecting(false)
     setActiveExaminerTurnId(null)
     setExaminerSpeechElapsedSeconds(0)
+    setExaminerSpeechDurationSeconds(0)
+    examinerSpeechDurationRef.current = 0
     examinerSpeechStartRef.current = null
     setStatus('Live session ended')
     await recordingComplete
@@ -436,6 +535,27 @@ export function useGeminiLive({ apiKey, systemInstruction, openingPrompt = 'Plea
     recordingChunksRef.current = []
     return { recording, transcript: transcriptRef.current }
   }, [cleanupAudio, finishCandidateAudio, finishExaminerAudio])
+
+  const toggleMicMuted = useCallback(() => {
+    const nextMuted = !micMutedRef.current
+    micMutedRef.current = nextMuted
+    setMicMuted(nextMuted)
+    for (const track of micStreamRef.current?.getAudioTracks() ?? []) track.enabled = !nextMuted
+
+    if (nextMuted) {
+      candidateAudioChunksRef.current = []
+      candidateAudioOrderRef.current = null
+      candidateSilenceSamplesRef.current = 0
+      candidateDraftRef.current = ''
+      setCandidateDraft('')
+      try {
+        sessionRef.current?.sendRealtimeInput({ audioStreamEnd: true })
+      } catch (caughtError) {
+        console.error('Unable to close the active microphone input before muting.', caughtError)
+        setError('The microphone is muted locally, but the live audio input could not be closed cleanly.')
+      }
+    }
+  }, [])
 
   const sendText = useCallback((text: string) => {
     const trimmed = text.trim()
@@ -450,7 +570,7 @@ export function useGeminiLive({ apiKey, systemInstruction, openingPrompt = 'Plea
       turnComplete: true,
     })
     transcriptCanMergeRef.current = false
-    appendTranscript('candidate', trimmed, 'text')
+    appendTranscript('candidate', trimmed, 'text', true)
     setStatus('Text sent · waiting for your live reply')
   }, [appendTranscript, connected])
 
@@ -501,7 +621,7 @@ export function useGeminiLive({ apiKey, systemInstruction, openingPrompt = 'Plea
       setStatus('Recording shared · Speakia is listening')
     } catch (caughtError) {
       suppressInputTranscriptionRef.current = false
-      console.error('Unable to decode or stream the shared audio recording to Gemini Live.', caughtError)
+      console.error('Unable to decode or stream the shared audio recording to Speakia AI Live.', caughtError)
       throw new Error(caughtError instanceof Error
         ? `Speakia could not process this audio recording: ${caughtError.message}`
         : 'Speakia could not process this audio recording. Try another audio format.')
@@ -510,9 +630,9 @@ export function useGeminiLive({ apiKey, systemInstruction, openingPrompt = 'Plea
     }
   }, [audioContextCtor])
 
-  const start = useCallback(async () => {
+  const start = useCallback(async (overrides?: LiveSessionStartOverrides) => {
     if (!apiKey.trim()) {
-      setError('Enter your Gemini API key before connecting to the live examiner.')
+      setError('Enter your Speakia AI API key before connecting to the live examiner.')
       return false
     }
     if (sessionRef.current || connecting) return false
@@ -525,11 +645,17 @@ export function useGeminiLive({ apiKey, systemInstruction, openingPrompt = 'Plea
     setCandidateDraft('')
     transcriptCanMergeRef.current = false
     recordingChunksRef.current = []
+    nextAudioTimeRef.current = 0
+    examinerSpeechDurationRef.current = 0
+    micMutedRef.current = false
+    setMicMuted(false)
     candidateAudioChunksRef.current = []
     candidateSilenceSamplesRef.current = 0
     pendingCandidateAudioRef.current = []
     pendingCandidateTranscriptIdsRef.current = []
     examinerAudioChunksRef.current = []
+    examinerAudioOrderRef.current = null
+    candidateAudioOrderRef.current = null
     examinerTranscriptIdRef.current = null
     examinerSpeechStartRef.current = null
     setActiveExaminerTurnId(null)
@@ -565,38 +691,73 @@ export function useGeminiLive({ apiKey, systemInstruction, openingPrompt = 'Plea
       await inputContext.audioWorklet.addModule('/pcm-capture-processor.js')
 
       const client = new GoogleGenAI({ apiKey: apiKey.trim() })
-      setStatus('Connecting to Gemini Live…')
-      const session = await client.live.connect({
-        model: thinkingLevel ? 'gemini-3.8-live-extended-thinking' : 'gemini-3.8-live',
-        config: {
-          responseModalities: [Modality.AUDIO],
-          systemInstruction,
-          ...(thinkingLevel ? { thinkingConfig: { thinkingLevel } } : {}),
-          ...(tools?.length ? { tools } : {}),
-          inputAudioTranscription: {},
-          outputAudioTranscription: {},
-          realtimeInputConfig: { automaticActivityDetection: { disabled: false } },
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName },
+      const selectedLiveModel = liveModel ?? getProdiaLiveModel(thinkingLevel ? 'gemini-3.8-live-extended-thinking' : 'gemini-3.8-live')
+      const selectedThinkingLevel = selectedLiveModel === 'gemini-3.8-live-extended-thinking'
+        ? thinkingLevel ?? ThinkingLevel.LOW
+        : undefined
+      setStatus('Connecting to Speakia Live…')
+      let rejectEarlyConnection: (error: Error) => void = () => {}
+      let connectionReady = false
+      let setupTimeout: number | undefined
+      const connectionFailure = new Promise<never>((_resolve, reject) => {
+        rejectEarlyConnection = reject
+      })
+      let session: Session
+      try {
+        const connectPromise = client.live.connect({
+          model: selectedLiveModel,
+          config: {
+            responseModalities: [Modality.AUDIO],
+            systemInstruction: overrides?.systemInstruction ?? systemInstruction,
+            ...(selectedThinkingLevel ? { thinkingConfig: { thinkingLevel: selectedThinkingLevel } } : {}),
+            ...(tools?.length ? { tools } : {}),
+            ...(toolConfig ? { toolConfig } : {}),
+            inputAudioTranscription: {},
+            outputAudioTranscription: {},
+            realtimeInputConfig: { automaticActivityDetection: { disabled: false } },
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: { voiceName },
+              },
             },
           },
-        },
-        callbacks: {
-          onopen: () => setStatus('Connected · introducing the examiner…'),
-          onmessage: handleMessage,
-          onerror: (event) => {
-            console.error('Gemini Live connection error.', event)
-            setError('Gemini Live connection failed. Check the API key, model access, and network, then try again.')
+          callbacks: {
+            onopen: () => setStatus('Connected · preparing the examiner…'),
+            onmessage: handleMessage,
+            onerror: (event) => {
+              console.error('Speakia Live connection error.', event)
+              if (!connectionReady) {
+                rejectEarlyConnection(new Error(event.message || 'The live connection failed before setup completed.'))
+              }
+              if (reportGeminiQuota(event)) setError('')
+              else setError(event.message
+                ? `Speakia Live connection failed: ${event.message}`
+                : 'Speakia Live connection failed. Check the API key, model access, and network, then try again.')
+            },
+            onclose: (event) => {
+              sessionRef.current = null
+              setConnected(false)
+              setConnecting(false)
+              micMutedRef.current = false
+              setMicMuted(false)
+              setStatus('Live session closed')
+              if (!connectionReady) {
+                const reason = event.reason ? `: ${event.reason}` : ` (code ${event.code})`
+                rejectEarlyConnection(new Error(`The live connection closed before setup completed${reason}.`))
+              }
+            },
           },
-          onclose: () => {
-            sessionRef.current = null
-            setConnected(false)
-            setConnecting(false)
-            setStatus('Live session closed')
-          },
-        },
-      })
+        })
+        const timeout = new Promise<never>((_resolve, reject) => {
+          setupTimeout = window.setTimeout(() => {
+            reject(new Error('Speakia Live did not finish setup within 30 seconds. Check the connection and try again.'))
+          }, LIVE_SETUP_TIMEOUT_MS)
+        })
+        session = await Promise.race([connectPromise, connectionFailure, timeout])
+      } finally {
+        if (setupTimeout !== undefined) window.clearTimeout(setupTimeout)
+      }
+      connectionReady = true
       sessionRef.current = session
 
       const microphone = inputContext.createMediaStreamSource(stream)
@@ -614,11 +775,13 @@ export function useGeminiLive({ apiKey, systemInstruction, openingPrompt = 'Plea
       silentGain.connect(inputContext.destination)
       capture.port.onmessage = (event: MessageEvent<Float32Array>) => {
         if (sessionRef.current !== session) return
+        if (micMutedRef.current) return
         const samples = event.data
         let sum = 0
         for (let index = 0; index < samples.length; index += 1) sum += samples[index] * samples[index]
         const rms = Math.sqrt(sum / samples.length)
         if (rms > 0.018) {
+          if (candidateAudioOrderRef.current === null) candidateAudioOrderRef.current = performance.now()
           candidateAudioChunksRef.current.push(float32ToPcmBytes(resampleTo16k(samples, inputContext.sampleRate)))
           candidateSilenceSamplesRef.current = 0
         } else if (candidateAudioChunksRef.current.length
@@ -640,22 +803,26 @@ export function useGeminiLive({ apiKey, systemInstruction, openingPrompt = 'Plea
       setConnected(true)
       setConnecting(false)
       setStatus('Live examiner connected · speak naturally')
-      if (openingPrompt.trim()) {
+      const sessionOpeningPrompt = overrides?.openingPrompt ?? openingPrompt
+      if (sessionOpeningPrompt.trim()) {
         session.sendClientContent({
           turns: [{
             role: 'user',
-            parts: [{ text: openingPrompt }],
+            parts: [{ text: sessionOpeningPrompt }],
           }],
           turnComplete: true,
         })
       }
       return true
     } catch (caughtError) {
-      console.error('Unable to start the Gemini Live IELTS session.', caughtError)
+      console.error('Unable to start the Speakia AI Live IELTS session.', caughtError)
       const message = caughtError instanceof Error ? caughtError.message : 'Unknown connection error.'
-      setError(`Unable to start the live examiner: ${message}`)
+      if (reportGeminiQuota(caughtError)) setError('')
+      else setError(`Unable to start the live examiner: ${message}`)
       setConnecting(false)
       setConnected(false)
+      micMutedRef.current = false
+      setMicMuted(false)
       sessionRef.current?.close()
       sessionRef.current = null
       const recorder = mediaRecorderRef.current
@@ -666,7 +833,7 @@ export function useGeminiLive({ apiKey, systemInstruction, openingPrompt = 'Plea
       })
       return false
     }
-  }, [apiKey, audioContextCtor, cleanupAudio, connecting, handleMessage, openingPrompt, systemInstruction, thinkingLevel, tools, voiceName])
+  }, [apiKey, audioContextCtor, cleanupAudio, connecting, handleMessage, liveModel, openingPrompt, systemInstruction, thinkingLevel, tools, toolConfig, voiceName])
 
   useEffect(() => () => {
     sessionRef.current?.close()
@@ -680,16 +847,19 @@ export function useGeminiLive({ apiKey, systemInstruction, openingPrompt = 'Plea
   return {
     connected,
     connecting,
+    micMuted,
     status,
     error,
     transcript,
     candidateDraft,
     activeExaminerTurnId,
     examinerSpeechElapsedSeconds,
+    examinerSpeechDurationSeconds,
     sendText,
     sendInstruction,
     sendAudio,
     start,
+    toggleMicMuted,
     stop,
   }
 }

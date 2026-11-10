@@ -262,7 +262,7 @@ export default function PodcastStudioApp() {
   const startPodcast = async (selectedTopicPrompt?: string) => {
     teardown();
     setStatus("connecting");
-    setStatusMessage("Establishing dual Gemini Live studio feeds...");
+    setStatusMessage("Establishing dual Speakia AI Live studio feeds...");
 
     try {
       const audioCtx = new AudioContext({ sampleRate: 24_000 });

@@ -51,27 +51,27 @@ export function UrduTranslator({
   }
 
   return (
-    <section className="urdu-translator" aria-label="Urdu and IELTS English translation practice">
+    <section className="urdu-translator" aria-label="Pakistani Urdu and IELTS English translation practice">
       <div className="translator-mode-row">
-        <button type="button" className={!reverse ? 'translator-mode-active' : ''} aria-pressed={!reverse} onClick={() => { setIsChallenge(false); onModeChange('urdu-to-english') }}>Urdu → IELTS English</button>
+        <button type="button" className={!reverse ? 'translator-mode-active' : ''} aria-pressed={!reverse} onClick={() => { setIsChallenge(false); onModeChange('urdu-to-english') }}>Pakistani Urdu → IELTS English</button>
         <button type="button" className={reverse ? 'translator-mode-active' : ''} aria-pressed={reverse} onClick={() => { setIsChallenge(false); onModeChange('reverse-practice') }}><ArrowLeftRight size={14} /> Reverse practice</button>
       </div>
       <p className="translator-instructions">{reverse
-        ? 'Speakia gives you a natural Urdu sentence. Translate it into clear, IELTS-appropriate English.'
-        : 'Write an Urdu sentence or speak it in live mode. Speakia will give you a natural, IELTS-appropriate English version.'}</p>
+        ? 'Speakia gives you a natural Pakistani Urdu sentence. Translate it into clear, IELTS-appropriate English.'
+        : 'Write a Pakistani Urdu sentence or speak it in live mode. Speakia will give you a natural, IELTS-appropriate English version.'}</p>
       <form className="translator-form" onSubmit={(event) => void submit(event)}>
-        <label className="sr-only" htmlFor={`translator-input-${mode}`}>{reverse ? 'Your English translation' : 'Urdu sentence'}</label>
+        <label className="sr-only" htmlFor={`translator-input-${mode}`}>{reverse ? 'Your English translation' : 'Pakistani Urdu sentence'}</label>
         <textarea
           id={`translator-input-${mode}`}
           dir={reverse ? 'ltr' : 'auto'}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
-          placeholder={reverse ? 'Write your English translation…' : 'Write a sentence in Urdu…'}
+          placeholder={reverse ? 'Write your English translation…' : 'Write a sentence in Pakistani Urdu…'}
           rows={3}
           disabled={busy}
         />
         <div className="translator-actions">
-          {reverse && <button type="button" className="translator-voice-button" onClick={() => void requestTranslation('Give me one new Urdu sentence for IELTS Speaking translation practice.', true)} disabled={busy}>New Urdu sentence</button>}
+          {reverse && <button type="button" className="translator-voice-button" onClick={() => void requestTranslation('Give me one new Pakistani Urdu sentence for IELTS Speaking translation practice.', true)} disabled={busy}>New Urdu sentence</button>}
           <button type="button" className="translator-voice-button" onClick={() => live ? onStopVoice() : onStartVoice(mode)}>
             {live ? <MicOff size={15} /> : <Mic size={15} />}{live ? 'Stop live voice' : 'Practise by voice'}
           </button>

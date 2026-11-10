@@ -1,14 +1,11 @@
-import { GoogleGenAI } from '@google/genai'
+import { GoogleGenAI } from '@/lib/geminiClient'
 import type { CriterionId, CriterionResult, SentenceFeedback, TestPart, TestResult, TranscriptEntry } from './types'
 import { partLabel } from './questions'
 import { groupTranscriptTurns } from './transcript'
 
-export const ASSESSMENT_MODELS = [
-  { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
-  { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro Preview' },
-  { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash Lite' },
-  { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash Lite' },
-] as const
+import { GEMINI_TEXT_MODELS } from '@/lib/geminiModels'
+
+export const ASSESSMENT_MODELS = GEMINI_TEXT_MODELS
 
 export type AssessmentModel = typeof ASSESSMENT_MODELS[number]['id']
 
@@ -61,8 +58,8 @@ function parseEvaluation(text: string): RawEvaluation {
   try {
     decoded = JSON.parse(text)
   } catch (error) {
-    console.error('Gemini returned invalid JSON for the IELTS speaking assessment.', error)
-    throw new Error('Gemini returned an unreadable assessment. Try evaluating this recording again.')
+    console.error('Speakia AI returned invalid JSON for the IELTS speaking assessment.', error)
+    throw new Error('Speakia AI returned an unreadable assessment. Try evaluating this recording again.')
   }
 
   if (!isRecord(decoded) || typeof decoded.overallBand !== 'number'
@@ -74,7 +71,7 @@ function parseEvaluation(text: string): RawEvaluation {
     || !Array.isArray(decoded.strengths)
     || !Array.isArray(decoded.nextSteps) || typeof decoded.transcript !== 'string'
     || !Array.isArray(decoded.sentenceFeedback)) {
-    throw new Error('Gemini returned an incomplete assessment. Try evaluating this recording again.')
+    throw new Error('Speakia AI returned an incomplete assessment. Try evaluating this recording again.')
   }
 
   const validIds = new Set<CriterionId>(['fluency', 'lexical', 'grammar', 'pronunciation'])
@@ -89,7 +86,7 @@ function parseEvaluation(text: string): RawEvaluation {
       || value.band > 9
       || typeof value.evidence !== 'string'
       || typeof value.improvement !== 'string') {
-      throw new Error('Gemini returned an invalid criterion in its assessment. Try again.')
+      throw new Error('Speakia AI returned an invalid criterion in its assessment. Try again.')
     }
     criteria.push({
       id: value.id as CriterionId,
@@ -99,18 +96,18 @@ function parseEvaluation(text: string): RawEvaluation {
     })
   }
   if (new Set(criteria.map((criterion) => criterion.id)).size !== 4 || criteria.length !== 4) {
-    throw new Error('Gemini did not return all four IELTS speaking criteria. Try again.')
+    throw new Error('Speakia AI did not return all four IELTS speaking criteria. Try again.')
   }
   if (!decoded.strengths.every((item) => typeof item === 'string')
     || !decoded.nextSteps.every((item) => typeof item === 'string')) {
-    throw new Error('Gemini returned invalid feedback. Try again.')
+    throw new Error('Speakia AI returned invalid feedback. Try again.')
   }
   if (decoded.sentenceFeedback.length > 80 || !decoded.sentenceFeedback.every(isSentenceFeedback)) {
-    throw new Error('Gemini returned invalid sentence-by-sentence feedback. Try again.')
+    throw new Error('Speakia AI returned invalid sentence-by-sentence feedback. Try again.')
   }
 
   return {
-    overallBand: clampBand(decoded.overallBand),
+    overallBand: clampBand(criteria.reduce((total, criterion) => total + criterion.band, 0) / criteria.length),
     criteria,
     executiveSummary: decoded.executiveSummary.trim(),
     strengths: decoded.strengths.slice(0, 4) as string[],
@@ -172,7 +169,7 @@ function pcmToWavBlob(chunks: Uint8Array[]): Blob {
 export async function prepareAudioForAssessment(audio: Blob): Promise<Blob> {
   if (!audio.size) throw new Error('The saved test recording is empty.')
   if (audio.size > MAX_INLINE_AUDIO_BYTES) {
-    throw new Error('The saved test recording is too large to prepare for inline Gemini assessment.')
+    throw new Error('The saved test recording is too large to prepare for inline Speakia AI assessment.')
   }
   const context = new AudioContext()
   try {
@@ -194,11 +191,11 @@ export async function prepareAudioForAssessment(audio: Blob): Promise<Blob> {
     const bytes = float32ToPcmBytes(samples)
     const wav = pcmToWavBlob([bytes])
     if (wav.size > MAX_INLINE_AUDIO_BYTES) {
-      throw new Error('The saved test recording is too large for inline Gemini evaluation.')
+      throw new Error('The saved test recording is too large for inline Speakia AI evaluation.')
     }
     return wav
   } catch (error) {
-    console.error('Unable to prepare the saved test audio for Gemini assessment.', error)
+    console.error('Unable to prepare the saved test audio for Speakia AI assessment.', error)
     throw new Error(error instanceof Error
       ? `This recording could not be prepared for reassessment: ${error.message}`
       : 'This recording could not be prepared for reassessment.')
@@ -207,7 +204,10 @@ export async function prepareAudioForAssessment(audio: Blob): Promise<Blob> {
   }
 }
 
-export async function createTranscriptAudioCopy(transcript: TranscriptEntry[]): Promise<Blob> {
+export async function createTranscriptAudioCopy(
+  transcript: TranscriptEntry[],
+  onProgress?: (progress: { completed: number; total: number }) => void,
+): Promise<Blob> {
   const voiceTurns = transcript.filter(
     (turn): turn is TranscriptEntry & { audio: Blob } => turn.role !== 'assessment' && turn.audio instanceof Blob,
   )
@@ -221,19 +221,23 @@ export async function createTranscriptAudioCopy(transcript: TranscriptEntry[]): 
   if (transcriptVoiceTurns.some((turn) => !turn.audio)) {
     throw new Error('Some transcript turns are missing their original audio. Complete another live practice session so the full conversation can be evaluated.')
   }
+  const orderedVoiceTurns = voiceTurns.every((turn) => typeof turn.audioOrder === 'number' && Number.isFinite(turn.audioOrder))
+    ? [...voiceTurns].sort((left, right) => left.audioOrder! - right.audioOrder!)
+    : voiceTurns
 
   const decodingContext = new AudioContext()
   const chunks: Uint8Array[] = []
   const pauseBetweenTurns = new Uint8Array(Math.round(0.25 * AUDIO_SAMPLE_RATE) * 2)
   let totalBytes = 44
+  onProgress?.({ completed: 0, total: orderedVoiceTurns.length })
   try {
-    for (const [index, turn] of voiceTurns.entries()) {
+    for (const [index, turn] of orderedVoiceTurns.entries()) {
       const decoded = await decodingContext.decodeAudioData(await turn.audio.arrayBuffer())
       const outputLength = Math.max(1, Math.round(decoded.length * AUDIO_SAMPLE_RATE / decoded.sampleRate))
       const pcmLength = outputLength * 2
-      const pauseLength = index < voiceTurns.length - 1 ? pauseBetweenTurns.byteLength : 0
+      const pauseLength = index < orderedVoiceTurns.length - 1 ? pauseBetweenTurns.byteLength : 0
       if (totalBytes + pcmLength + pauseLength > MAX_INLINE_AUDIO_BYTES) {
-        throw new Error('The compiled transcript audio is too large for inline Gemini evaluation. Shorten the practice and try again.')
+        throw new Error('The compiled transcript audio is too large for inline Speakia AI evaluation. Shorten the practice and try again.')
       }
 
       const samples = new Float32Array(outputLength)
@@ -255,6 +259,7 @@ export async function createTranscriptAudioCopy(transcript: TranscriptEntry[]): 
       chunks.push(float32ToPcmBytes(samples))
       if (pauseLength) chunks.push(pauseBetweenTurns)
       totalBytes += pcmLength + pauseLength
+      onProgress?.({ completed: index + 1, total: orderedVoiceTurns.length })
     }
   } finally {
     if (decodingContext.state !== 'closed') {
@@ -277,11 +282,11 @@ export async function assessSpeakingAudio(
   durationSeconds: number,
   model: AssessmentModel,
 ): Promise<TestResult> {
-  if (!apiKey.trim()) throw new Error('Add your Gemini API key before starting a practice test.')
+  if (!apiKey.trim()) throw new Error('Add your Speakia AI API key before starting a practice test.')
 
   if (audioCopy.size === 0) throw new Error('The compiled conversation audio is empty.')
   if (audioCopy.size > MAX_INLINE_AUDIO_BYTES) {
-    throw new Error('The compiled transcript audio is too large for inline Gemini evaluation. Shorten the practice and try again.')
+    throw new Error('The compiled transcript audio is too large for inline Speakia AI evaluation. Shorten the practice and try again.')
   }
   const audioBase64 = bytesToBase64(new Uint8Array(await audioCopy.arrayBuffer()))
   const transcriptTurns = groupTranscriptTurns(transcript.filter((turn) => turn.role !== 'assessment'))
@@ -294,15 +299,18 @@ export async function assessSpeakingAudio(
       parts: [
         {
           text: [
-            `Assess this ${partLabel(part)} as IELTS Speaking practice using the official four public speaking assessment criteria.`,
-            'The inline WAV is a compiled copy of the original captured examiner and candidate transcript-turn voices, in conversation order, with short pauses between turns. Evaluate only the candidate voice for the IELTS criteria.',
-            'Return a whole or half IELTS band from 0 to 9 for each criterion and an overall band that is the arithmetic mean rounded to the nearest half band.',
-            'Use the transcript as supporting context only; listen for intelligibility, stress, intonation, connected speech, hesitation and pace in the actual audio.',
-            'For every criterion, cite specific evidence from the candidate and give one actionable improvement. Do not invent words or claim certainty where the recording is unclear.',
-            'Also provide feedback, in conversation order, for every complete candidate sentence and clear candidate sentence fragment in the conversation transcript. Preserve the original sentence exactly when intelligible. For each, identify a genuine grammar, word choice, coherence, or clarity issue (or say no major issue), give a corrected natural version that keeps the intended meaning, give an illustrative Band 8-style alternative without guaranteeing a band, and briefly explain the improvement. Do not invent mistakes or rewrite examiner speech.',
+            `Assess this ${partLabel(part)} IELTS Speaking practice using the four public speaking criteria. Treat this as a careful, evidence-led assessment of the candidate's demonstrated ability, not a prediction of their potential.`,
+            'The inline WAV is a compiled copy of captured examiner and candidate turns in conversation order, with short pauses between turns. Use the role-labelled transcript to identify who is speaking, then evaluate only the candidate turns. Never score examiner speech, the length of the test, microphone quality, or the candidate’s accent/background.',
+            'Listen to the audio as the primary evidence. Use the transcript to locate and understand candidate responses, but do not assume it is perfectly accurate. If wording or a pronunciation feature is unclear, do not guess; describe the limitation and avoid penalizing uncertain evidence.',
+            'Calibrate each criterion independently against IELTS-style whole and half bands. Use these anchors consistently: Band 5 indicates noticeable limitations that often disrupt development or control; Band 6 indicates generally effective communication with recurring hesitation, imprecision, or errors; Band 7 indicates a sustained, well-developed performance with flexible language and mostly controlled delivery, though some lapses remain; Band 8 indicates consistently fluent, precise, flexible, and well-controlled speaking with only occasional minor slips; Band 9 indicates consistently natural, precise, effortless control with no meaningful weakness evident. Bands 0–4 should be used when the performance shows substantially more limited ability than the Band 5 anchor. Do not default to Band 6 or 7; award higher bands only when the recording demonstrates their characteristics consistently.',
+            'Apply the anchors specifically: Fluency & Coherence measures pace, continuity, relevance, logical progression, and linking without penalizing a brief natural pause; Lexical Resource measures range, precision, collocation, paraphrase, and repetition; Grammatical Range & Accuracy measures variety, control, and the frequency and impact of errors; Pronunciation measures intelligibility, word stress, rhythm, chunking, and intonation. Do not infer pronunciation from text or penalize a recognizable accent.',
+            'Judge the task actually completed: respect the scope and expected response type of the selected section. For a full test, consider the candidate’s performance across Parts 1, 2, and 3; for a single-part test, score only that section. Do not reward verbosity, memorized-sounding language, or topic knowledge unless it supports relevant, clear spoken communication. Do not penalize the candidate for examiner interruptions or prompts.',
+            'Give a whole or half band from 0 to 9 for each criterion. Calculate overallBand as the arithmetic mean of the four criterion bands rounded to the nearest half band; do not independently estimate or inflate the overall score.',
+            'For each criterion, give concise evidence tied to specific audible candidate behavior and one actionable improvement. Avoid vague praise, contradictory evidence, unsupported precision, and false certainty.',
+            'Provide sentence feedback in conversation order for up to 25 representative complete candidate sentences or clear fragments, prioritizing meaningful, audible issues. Preserve original wording when intelligible; state when there is no major issue rather than inventing one. For each item, give a natural correction that preserves intended meaning, an illustrative Band 8-style alternative (not a guaranteed score), and a brief explanation. Never assess or rewrite examiner speech.',
             'Use concise, constructive feedback. This is a practice estimate, not an official IELTS score.',
-            'As Speakia, the candidate’s AI IELTS practice examiner, write an executiveSummary of 2–3 concise sentences (about 45–75 words) addressed directly to the candidate. Give a balanced high-level view of overall performance, identify the most important strength and growth area using only assessment evidence, and offer an encouraging but realistic perspective. Do not repeat the numeric band or promise a future score.',
-            'Return one valid JSON object with keys overallBand (number), executiveSummary (string), criteria (array of exactly four objects with id, band, evidence, improvement), strengths (string array), nextSteps (string array), transcript (string), and sentenceFeedback (array of at most 80 objects with originalSentence, issue, correction, bandEightVersion, explanation). Use criterion ids fluency, lexical, grammar, and pronunciation. Do not include markdown fences or extra text.',
+            'As Speakia, write an executiveSummary of 2–3 concise sentences addressed directly to the candidate. Balance strengths and growth areas using only evidence in this recording. Keep the assessment realistic and constructive; do not promise a future score.',
+            'Return one valid JSON object with keys overallBand (number), executiveSummary (string), criteria (array of exactly four objects with id, band, evidence, improvement), strengths (string array), nextSteps (string array), transcript (string), and sentenceFeedback (array of at most 25 objects with originalSentence, issue, correction, bandEightVersion, explanation). Use criterion ids fluency, lexical, grammar, and pronunciation. Ensure overallBand is the arithmetic mean of the four criterion bands rounded to the nearest half band. Do not include markdown fences or extra text.',
             'Conversation transcript:',
             conversation || 'No transcription was returned by the Live API.',
           ].join('\n'),
@@ -317,7 +325,7 @@ export async function assessSpeakingAudio(
   })
 
   if (!response.text?.trim()) {
-    throw new Error('Gemini returned an empty assessment. Try evaluating this recording again.')
+    throw new Error('Speakia AI returned an empty assessment. Try evaluating this recording again.')
   }
 
   const evaluation = parseEvaluation(response.text)
@@ -326,7 +334,7 @@ export async function assessSpeakingAudio(
     id: criterion.id,
     name: names[criterion.id],
     band: criterion.band,
-    assessmentType: 'Gemini audio assessment',
+    assessmentType: 'Speakia audio assessment',
     note: `${criterion.evidence} Improvement: ${criterion.improvement}`,
   }))
   const answers = transcriptTurns
@@ -371,9 +379,17 @@ export function createExaminerInstructions(part: TestPart, prompts: string[]): s
     'Do not answer questions for the candidate. If they ask what a word means, politely ask them to answer in their own words.',
     'Follow IELTS Speaking practice structure and natural pacing. At the beginning of every test, introduce yourself using this exact identity and wording: "Hello, my name is Speakia, and I’ll be your IELTS Speaking examiner today." Never invent, choose, or use another examiner name. Do not claim to be an official IELTS examiner.',
     'For Part 1, ask the supplied familiar-topic questions naturally, in order.',
-    'For Part 2, present the supplied cue card clearly, tell the candidate they have one minute to prepare and should speak for up to two minutes. After their long turn, ask one brief related follow-up.',
+    ...(part === 'part2' ? [
+      'This is a standalone Part 2-only practice. The application has already shown the supplied cue card and handled the one-minute preparation period. Start directly by inviting the candidate to speak about the cue card for up to two minutes; do not read or present the card again.',
+      'You are already conducting Part 2. Never announce or suggest moving on to Part 2, and never transition to Part 3 or another test section. After the candidate finishes the long turn, ask one brief related follow-up, then conclude this single-part practice and call mark_speaking_test_complete when its completion requirements are met.',
+    ] : [
+      'For Part 2, present the supplied cue card clearly, tell the candidate they have one minute to prepare and should speak for up to two minutes. After their long turn, ask one brief related follow-up.',
+    ]),
     'For Part 3, ask the supplied abstract discussion questions one at a time, using a short relevant follow-up when appropriate.',
     'If this is a single-part practice, conduct only that part. For a full test, transition from Part 1 to Part 2 to Part 3.',
+    ...(part === 'full' ? [
+      'In a full test, clearly announce each section transition aloud using these exact phrases: "Now we will move on to Part 2" before presenting the Part 2 cue card, and "Now we will move on to Part 3" before beginning the discussion.',
+    ] : []),
     'Do not announce the test is complete or call the mark_speaking_test_complete tool until you have completed every required section of the selected format and have asked the necessary questions. For a full test, finish Parts 1, 2 and 3 in sequence. For a single part, complete a representative set of questions for that part. If a question is skipped, continue the test and replace it with a suitable question where needed.',
     'Only after the selected test format is genuinely complete, briefly say the practice test is complete and that written assessment is being prepared, then call mark_speaking_test_complete. Never call this tool just because the candidate says they are finished early or after only a few turns.',
     `Selected format: ${partLabel(part)}.`,

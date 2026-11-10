@@ -31,7 +31,7 @@ function isTestResult(value: unknown): value is TestResult {
       && Number.isFinite(criterion.band)
       && criterion.band >= 0
       && criterion.band <= 9
-      && criterion.assessmentType === 'Gemini audio assessment'
+      && (criterion.assessmentType === 'Speakia audio assessment' || criterion.assessmentType === 'Gemini audio assessment')
       && typeof criterion.note === 'string',
     )
     && Array.isArray(candidate.answers)
@@ -70,6 +70,7 @@ function isTestResult(value: unknown): value is TestResult {
     && (candidate.audioAvailable === undefined || typeof candidate.audioAvailable === 'boolean')
     && (candidate.audioCopyAvailable === undefined || typeof candidate.audioCopyAvailable === 'boolean')
     && (candidate.assessmentModel === undefined || typeof candidate.assessmentModel === 'string')
+    && (candidate.assessmentDurationMs === undefined || (typeof candidate.assessmentDurationMs === 'number' && Number.isFinite(candidate.assessmentDurationMs) && candidate.assessmentDurationMs >= 0))
     && (candidate.assessmentLessonAvailable === undefined || typeof candidate.assessmentLessonAvailable === 'boolean')
     && (candidate.assessmentLessonVersion === undefined || typeof candidate.assessmentLessonVersion === 'string')
 }
@@ -87,7 +88,10 @@ export function loadTestResults(): TestResult[] {
     if (validResults.length !== parsed.length) {
       console.warn(`${parsed.length - validResults.length} saved test result(s) were invalid or from an older format and were ignored.`)
     }
-    return validResults
+    return validResults.map((result) => ({
+      ...result,
+      criteria: result.criteria.map((criterion) => ({ ...criterion, assessmentType: 'Speakia audio assessment' })),
+    }))
   } catch (error) {
     console.error('Unable to load Speakia test history from local storage.', error)
     return []

@@ -4,13 +4,35 @@ export interface TimedTranscriptTurn {
   audioDurationSeconds?: number
 }
 
+function wordTimingWeight(word: string): number {
+  const letters = word.toLocaleLowerCase().match(/[a-z]+/g)?.join('') ?? word
+  const syllables = Math.max(1, (letters.match(/[aeiouy]+/g) ?? []).length
+    - (/[aeiou]e$/i.test(letters) ? 1 : 0)
+    + (/[^aeiou]le$/i.test(letters) ? 1 : 0))
+  const punctuation = /[.!?…]["')\]]*$/.test(word) ? 0.7
+    : /[,;:]["')\]]*$/.test(word) ? 0.3
+      : 0
+  return 0.55 + syllables * 0.45 + punctuation
+}
+
 export function wordIndexAtElapsed(text: string, elapsedSeconds: number, durationSeconds?: number): number {
-  const wordCount = text.trim().split(/\s+/).filter(Boolean).length
-  if (!wordCount || elapsedSeconds < 0) return -1
-  const progress = durationSeconds && durationSeconds > 0
-    ? elapsedSeconds / durationSeconds
-    : elapsedSeconds * 2.7 / wordCount
-  return Math.max(0, Math.min(wordCount - 1, Math.floor(progress * wordCount)))
+  const words = text.match(/\S+/g) ?? []
+  if (!words.length || elapsedSeconds < 0) return -1
+  const weights = words.map(wordTimingWeight)
+  const totalWeight = weights.reduce((total, weight) => total + weight, 0)
+  const elapsed = durationSeconds && durationSeconds > 0
+    ? elapsedSeconds / durationSeconds * totalWeight
+    : elapsedSeconds * 2.7
+  let offset = 0
+  for (let index = 0; index < weights.length; index += 1) {
+    offset += weights[index]
+    if (elapsed < offset) return index
+  }
+  return words.length - 1
+}
+
+export function lastWordIndex(text: string): number {
+  return Math.max(-1, (text.match(/\S+/g)?.length ?? 0) - 1)
 }
 
 export function transcriptPositionAtTime(

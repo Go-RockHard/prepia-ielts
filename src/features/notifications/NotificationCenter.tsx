@@ -9,7 +9,7 @@ interface AppNotification {
   detail: string
   label: string
   tone: 'critical' | 'assignment' | 'reminder'
-  destination: 'Settings' | 'Assignments' | 'Practice'
+  destination: 'Settings' | 'Assignments' | 'Practice' | 'Placement Assessment'
 }
 
 function readIds(username: string): string[] {
@@ -32,13 +32,15 @@ export function NotificationCenter({
   apiKeyAvailable,
   assignments,
   results,
+  placementCompleted,
   onNavigate,
 }: {
   username: string
   apiKeyAvailable: boolean
   assignments: CoachAssignment[]
   results: TestResult[]
-  onNavigate: (section: 'Settings' | 'Assignments' | 'Practice') => void
+  placementCompleted: boolean
+  onNavigate: (section: 'Settings' | 'Assignments' | 'Practice' | 'Placement Assessment') => void
 }) {
   const [isOpen, setIsOpen] = useState(false)
   const [readNotificationIds, setReadNotificationIds] = useState(() => readIds(username))
@@ -49,11 +51,21 @@ export function NotificationCenter({
     if (!apiKeyAvailable) {
       items.push({
         id: 'missing-api-key',
-        title: 'Connect your Gemini API key',
+        title: 'Connect your Speakia AI API key',
         detail: 'Live speaking drills, assessments, and AI coaching need a saved API key.',
         label: 'Action needed',
         tone: 'critical',
         destination: 'Settings',
+      })
+    }
+    if (!placementCompleted) {
+      items.push({
+        id: 'speaking-placement-assessment',
+        title: 'Find your Speaking starting point',
+        detail: 'Take an optional short baseline so Speakia can tailor your first practice pathway.',
+        label: 'Optional placement',
+        tone: 'reminder',
+        destination: 'Placement Assessment',
       })
     }
     assignments.filter((assignment) => assignment.status === 'assigned').forEach((assignment) => {
@@ -79,7 +91,7 @@ export function NotificationCenter({
       })
     }
     return items
-  }, [apiKeyAvailable, assignments, now, results])
+  }, [apiKeyAvailable, assignments, now, placementCompleted, results])
   const unreadCount = notifications.filter((item) => !readNotificationIds.includes(item.id)).length
 
   function persistReadIds(ids: string[]): boolean {

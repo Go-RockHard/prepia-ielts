@@ -25,19 +25,78 @@ import { shareAudioWithCoach } from '@/features/assistant/audioSharing'
 import { SpeechHighlight } from '@/features/simulator/SpeechHighlight'
 import { transcriptPositionAtTime, wordIndexAtElapsed } from '@/features/simulator/speechTiming'
 import { deletePodcastAudio, loadPodcastAudio, savePodcastAudio } from './audioStorage'
-import { generateSpeakiaPodcast, synthesizePodcastAudio } from './podcastGeneration'
+import { generateSpeakiaPodcast, generateWritiaPodcast, synthesizePodcastAudio } from './podcastGeneration'
 import { loadPodcasts, savePodcasts } from './storage'
 import { useLivePodcast } from './useLivePodcast'
 import {
-  PODCAST_SCRIPT_MODELS,
+  DEFAULT_PODCAST_TURN_COUNT,
+  PODCAST_HOST_PRESETS,
   PODCAST_LANGUAGES,
+  PODCAST_SCRIPT_MODELS,
+  PODCAST_TURN_COUNTS,
   PODCAST_TTS_MODELS,
+  type PodcastHost,
+  type PodcastHostGender,
   type PodcastLanguage,
   type PodcastPlaybackMode,
+  type PodcastProduct,
   type PodcastScriptModel,
   type PodcastTtsModel,
+  type PodcastWritingAssessment,
   type SpeakiaPodcast,
 } from './types'
+
+interface PodcastHostChoice extends PodcastHost {
+  customName: boolean
+}
+
+function randomHostPair(): [PodcastHostChoice, PodcastHostChoice] {
+  const femaleNames = PODCAST_HOST_PRESETS.female
+  const maleNames = PODCAST_HOST_PRESETS.male
+  const firstGender: PodcastHostGender = Math.random() < 0.5 ? 'female' : 'male'
+  const secondGender: PodcastHostGender = Math.random() < 0.5 ? 'female' : 'male'
+  const firstOptions = PODCAST_HOST_PRESETS[firstGender]
+  const secondOptions = PODCAST_HOST_PRESETS[secondGender]
+  const firstName = firstOptions[Math.floor(Math.random() * firstOptions.length)]
+  let secondName = secondOptions[Math.floor(Math.random() * secondOptions.length)]
+  if (firstGender === secondGender && secondName === firstName) {
+    const options = secondGender === 'female' ? femaleNames : maleNames
+    secondName = options[(options.indexOf(secondName) + 1) % options.length]
+  }
+  return [
+    { name: firstName, gender: firstGender, customName: false },
+    { name: secondName, gender: secondGender, customName: false },
+  ]
+}
+
+function loadPodcastHosts(username: string, product: PodcastProduct): [PodcastHostChoice, PodcastHostChoice] {
+  const fallback = randomHostPair()
+  try {
+    const stored = localStorage.getItem(`${product}-podcasts-hosts-v1:${username.trim().toLocaleLowerCase()}`)
+    if (!stored) return fallback
+    const parsed: unknown = JSON.parse(stored)
+    if (!Array.isArray(parsed) || parsed.length !== 2 || !parsed.every((host) =>
+      typeof host === 'object'
+      && host !== null
+      && 'name' in host && typeof host.name === 'string'
+      && host.name.trim().length > 0 && host.name.length <= 40
+      && 'gender' in host && (host.gender === 'female' || host.gender === 'male')
+      && 'customName' in host && typeof host.customName === 'boolean')) {
+      throw new Error('Saved podcast host preferences are invalid.')
+    }
+    return parsed as [PodcastHostChoice, PodcastHostChoice]
+  } catch (error) {
+    console.error('Unable to load saved podcast host preferences.', error)
+    return fallback
+  }
+}
+
+function podcastHosts(podcast: SpeakiaPodcast): [PodcastHost, PodcastHost] {
+  return podcast.hosts ?? [
+    { name: podcast.turns[0]?.speaker ?? 'Aisha', gender: 'female' },
+    { name: podcast.turns[1]?.speaker ?? 'Noah', gender: 'male' },
+  ]
+}
 
 const podcastTopics = [
   'My progress and what to practise next',
@@ -47,14 +106,25 @@ const podcastTopics = [
   'Confidence, fluency, and handling difficult questions',
 ]
 
+const writiaPodcastTopics = [
+  'My writing strengths and next priorities',
+  'How to make the most of Writia',
+  'Build a weekly IELTS Writing improvement plan',
+  'Task 1 overview and accurate data description',
+  'Task 2 ideas, paragraph development, and argument',
+  'Precise vocabulary and grammatical control',
+  'From writing drills to independent task performance',
+]
+
 function loadPodcastModelPreference<T extends string>(
   username: string,
+  product: PodcastProduct,
   key: 'script-model' | 'speech-model' | 'language',
   options: readonly { id: T; label: string }[],
   fallback: T,
 ): T {
   try {
-    const saved = localStorage.getItem(`speakia-podcasts-${key}-v1:${username.trim().toLocaleLowerCase()}`)
+    const saved = localStorage.getItem(`${product}-podcasts-${key}-v1:${username.trim().toLocaleLowerCase()}`)
     return options.find((option) => option.id === saved)?.id ?? fallback
   } catch (error) {
     console.error(`Unable to load the saved podcast ${key} preference.`, error)
@@ -62,18 +132,28 @@ function loadPodcastModelPreference<T extends string>(
   }
 }
 
-function loadPodcastStreamingPreference(username: string): boolean {
+function loadPodcastTurnPreference(username: string, product: PodcastProduct): number {
   try {
-    return localStorage.getItem(`speakia-podcasts-streaming-v1:${username.trim().toLocaleLowerCase()}`) === 'true'
+    const saved = Number(localStorage.getItem(`${product}-podcasts-turn-count-v1:${username.trim().toLocaleLowerCase()}`))
+    return PODCAST_TURN_COUNTS.find((option) => option === saved) ?? DEFAULT_PODCAST_TURN_COUNT
+  } catch (error) {
+    console.error('Unable to load the saved podcast turn-count preference.', error)
+    return DEFAULT_PODCAST_TURN_COUNT
+  }
+}
+
+function loadPodcastStreamingPreference(username: string, product: PodcastProduct): boolean {
+  try {
+    return localStorage.getItem(`${product}-podcasts-streaming-v1:${username.trim().toLocaleLowerCase()}`) === 'true'
   } catch (error) {
     console.error('Unable to load the saved podcast streaming preference.', error)
     return false
   }
 }
 
-function loadPodcastPlaybackMode(username: string): PodcastPlaybackMode {
+function loadPodcastPlaybackMode(username: string, product: PodcastProduct): PodcastPlaybackMode {
   try {
-    return localStorage.getItem(`speakia-podcasts-playback-mode-v1:${username.trim().toLocaleLowerCase()}`) === 'live'
+    return localStorage.getItem(`${product}-podcasts-playback-mode-v1:${username.trim().toLocaleLowerCase()}`) === 'live'
       ? 'live'
       : 'recorded'
   } catch (error) {
@@ -146,6 +226,9 @@ export function PodcastsPage({
   results,
   lexicalEntries,
   assignments,
+  product = 'speakia',
+  writingAssessments = [],
+  writingAssignments = [],
 }: {
   username: string
   profile: UserProfile
@@ -153,19 +236,26 @@ export function PodcastsPage({
   results: TestResult[]
   lexicalEntries: LexicalEntry[]
   assignments: CoachAssignment[]
+  product?: PodcastProduct
+  writingAssessments?: PodcastWritingAssessment[]
+  writingAssignments?: Array<{ title: string; focus: string; status: string }>
 }) {
-  const [podcasts, setPodcasts] = useState(() => loadPodcasts(username))
-  const [selectedId, setSelectedId] = useState<string | null>(() => loadPodcasts(username)[0]?.id ?? null)
-  const [topic, setTopic] = useState(podcastTopics[0])
+  const brandName = product === 'writia' ? 'Writia' : 'Speakia'
+  const topics = product === 'writia' ? writiaPodcastTopics : podcastTopics
+  const [podcasts, setPodcasts] = useState(() => loadPodcasts(username, product))
+  const [selectedId, setSelectedId] = useState<string | null>(() => loadPodcasts(username, product)[0]?.id ?? null)
+  const [topic, setTopic] = useState(topics[0])
   const [customTopic, setCustomTopic] = useState('')
   const [scriptModel, setScriptModel] = useState<PodcastScriptModel>(() =>
-    loadPodcastModelPreference(username, 'script-model', PODCAST_SCRIPT_MODELS, PODCAST_SCRIPT_MODELS[0].id))
+    loadPodcastModelPreference(username, product, 'script-model', PODCAST_SCRIPT_MODELS, PODCAST_SCRIPT_MODELS[0].id))
   const [speechModel, setSpeechModel] = useState<PodcastTtsModel>(() =>
-    loadPodcastModelPreference(username, 'speech-model', PODCAST_TTS_MODELS, PODCAST_TTS_MODELS[0].id))
+    loadPodcastModelPreference(username, product, 'speech-model', PODCAST_TTS_MODELS, PODCAST_TTS_MODELS[0].id))
   const [language, setLanguage] = useState<PodcastLanguage>(() =>
-    loadPodcastModelPreference(username, 'language', PODCAST_LANGUAGES, PODCAST_LANGUAGES[0].id))
-  const [streaming, setStreaming] = useState(() => loadPodcastStreamingPreference(username))
-  const [playbackMode, setPlaybackMode] = useState<PodcastPlaybackMode>(() => loadPodcastPlaybackMode(username))
+    loadPodcastModelPreference(username, product, 'language', PODCAST_LANGUAGES, PODCAST_LANGUAGES[0].id))
+  const [hosts, setHosts] = useState<[PodcastHostChoice, PodcastHostChoice]>(() => loadPodcastHosts(username, product))
+  const [streaming, setStreaming] = useState(() => loadPodcastStreamingPreference(username, product))
+  const [playbackMode, setPlaybackMode] = useState<PodcastPlaybackMode>(() => loadPodcastPlaybackMode(username, product))
+  const [turnCount, setTurnCount] = useState(() => loadPodcastTurnPreference(username, product))
   const [query, setQuery] = useState('')
   const [generating, setGenerating] = useState(false)
   const [loadingAudio, setLoadingAudio] = useState(false)
@@ -179,6 +269,7 @@ export function PodcastsPage({
   const [notice, setNotice] = useState('')
   const [audioSource, setAudioSource] = useState<{ podcastId: string; url: string; mode: 'recorded' | 'live' } | null>(null)
   const audioRef = useRef<HTMLAudioElement>(null)
+  const podcastTranscriptRef = useRef<HTMLDivElement>(null)
   const podcastsRef = useRef(podcasts)
   const selectedPodcast = podcasts.find((podcast) => podcast.id === selectedId) ?? null
   const saveLivePodcastAudio = useCallback(async (podcastId: string, audio: Blob, turns: SpeakiaPodcast['turns'], durationSeconds: number) => {
@@ -186,30 +277,54 @@ export function PodcastsPage({
     const nextPodcasts = podcastsRef.current.map((podcast) => podcast.id === podcastId
       ? { ...podcast, turns, durationSeconds, liveAudioAvailable: true }
       : podcast)
-    if (!savePodcasts(username, nextPodcasts)) {
+    if (!savePodcasts(username, nextPodcasts, product)) {
       throw new Error('The live podcast audio was generated but its archive could not be updated.')
     }
     podcastsRef.current = nextPodcasts
     setPodcasts(nextPodcasts)
     setNotice('Your live podcast is complete. Its audio is saved for replay.')
-  }, [username])
+  }, [product, username])
   const livePodcast = useLivePodcast(saveLivePodcastAudio)
   const selectedPodcastTurns = selectedPodcast
     ? selectedPodcast.playbackMode === 'live' && livePodcast.podcastId === selectedPodcast.id
       ? livePodcast.turns
       : selectedPodcast.turns
     : []
+  const selectedPodcastHosts = selectedPodcast ? podcastHosts(selectedPodcast) : [
+    { name: 'Aisha', gender: 'female' as const },
+    { name: 'Hamza', gender: 'male' as const },
+  ]
   const filteredPodcasts = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase()
     return podcasts.filter((podcast) => (
       (archiveModeFilter === 'all' || (podcast.playbackMode ?? 'recorded') === archiveModeFilter)
-      && (!normalizedQuery || `${podcast.title} ${podcast.topic} ${podcast.summary}`.toLocaleLowerCase().includes(normalizedQuery))
+      && (!normalizedQuery || `${podcast.title} ${podcast.topic} ${podcast.summary} ${podcast.turns.map((turn) => turn.text).join(' ')}`.toLocaleLowerCase().includes(normalizedQuery)
+        || normalizedQuery.split(/\s+/).every((term) => `${podcast.title} ${podcast.topic} ${podcast.summary} ${podcast.turns.map((turn) => turn.text).join(' ')}`.toLocaleLowerCase().includes(term)))
     ))
   }, [archiveModeFilter, podcasts, query])
+  const transcriptSearchTerms = useMemo(() => query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean), [query])
+  const transcriptMatchPodcast = useMemo(() => {
+    if (!transcriptSearchTerms.length) return null
+    return filteredPodcasts.find((podcast) => {
+      const transcript = podcast.turns.map((turn) => turn.text).join(' ').toLocaleLowerCase()
+      return transcriptSearchTerms.every((term) => transcript.includes(term))
+    }) ?? null
+  }, [filteredPodcasts, transcriptSearchTerms])
 
   useEffect(() => {
     podcastsRef.current = podcasts
   }, [podcasts])
+
+  useEffect(() => {
+    if (!transcriptMatchPodcast || selectedId !== transcriptMatchPodcast.id) return
+    const frameId = window.requestAnimationFrame(() => {
+      podcastTranscriptRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      window.requestAnimationFrame(() => {
+        podcastTranscriptRef.current?.querySelector<HTMLElement>('.speech-word-search-match[tabindex="-1"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      })
+    })
+    return () => window.cancelAnimationFrame(frameId)
+  }, [selectedId, transcriptMatchPodcast])
 
   useEffect(() => {
     const audioElement = audioRef.current
@@ -221,31 +336,58 @@ export function PodcastsPage({
 
   useEffect(() => {
     try {
-      localStorage.setItem(`speakia-podcasts-script-model-v1:${username.trim().toLocaleLowerCase()}`, scriptModel)
-      localStorage.setItem(`speakia-podcasts-speech-model-v1:${username.trim().toLocaleLowerCase()}`, speechModel)
-      localStorage.setItem(`speakia-podcasts-language-v1:${username.trim().toLocaleLowerCase()}`, language)
-      localStorage.setItem(`speakia-podcasts-streaming-v1:${username.trim().toLocaleLowerCase()}`, String(streaming))
-      localStorage.setItem(`speakia-podcasts-playback-mode-v1:${username.trim().toLocaleLowerCase()}`, playbackMode)
+      localStorage.setItem(`${product}-podcasts-script-model-v1:${username.trim().toLocaleLowerCase()}`, scriptModel)
+      localStorage.setItem(`${product}-podcasts-speech-model-v1:${username.trim().toLocaleLowerCase()}`, speechModel)
+      localStorage.setItem(`${product}-podcasts-language-v1:${username.trim().toLocaleLowerCase()}`, language)
+      localStorage.setItem(`${product}-podcasts-streaming-v1:${username.trim().toLocaleLowerCase()}`, String(streaming))
+      localStorage.setItem(`${product}-podcasts-playback-mode-v1:${username.trim().toLocaleLowerCase()}`, playbackMode)
+      localStorage.setItem(`${product}-podcasts-turn-count-v1:${username.trim().toLocaleLowerCase()}`, String(turnCount))
+      localStorage.setItem(`${product}-podcasts-hosts-v1:${username.trim().toLocaleLowerCase()}`, JSON.stringify(hosts))
     } catch (error) {
       console.error('Unable to save the podcast model preferences.', error)
     }
-  }, [language, playbackMode, scriptModel, speechModel, streaming, username])
+  }, [hosts, language, playbackMode, product, scriptModel, speechModel, streaming, turnCount, username])
+
+  function updateHost(index: 0 | 1, update: Partial<PodcastHostChoice>) {
+    setHosts((current) => current.map((host, hostIndex) => hostIndex === index
+      ? { ...host, ...update }
+      : host) as [PodcastHostChoice, PodcastHostChoice])
+  }
+
+  function selectHostPreset(index: 0 | 1, value: string) {
+    if (value === 'custom') {
+      updateHost(index, { name: '', customName: true })
+      return
+    }
+    updateHost(index, { name: value, customName: false })
+  }
+
+  function selectHostGender(index: 0 | 1, gender: PodcastHostGender) {
+    const host = hosts[index]
+    updateHost(index, {
+      gender,
+      ...(!host.customName ? { name: PODCAST_HOST_PRESETS[gender][0] } : {}),
+    })
+  }
 
   async function playPodcast(podcast: SpeakiaPodcast) {
     setError('')
     setNotice('')
-    if ((podcast.playbackMode ?? 'recorded') === 'live') {
-      if (livePodcast.state !== 'idle') {
+    setSelectedId(podcast.id)
+    const mode = podcast.playbackMode ?? 'recorded'
+    if (livePodcast.state !== 'idle') {
+      if (livePodcast.podcastId === podcast.id && livePodcast.state !== 'saving') {
         livePodcast.stop()
         return
       }
-      audioRef.current?.pause()
-      setPlayingId(null)
-      setSelectedId(podcast.id)
-      await livePodcast.start(podcast.topic, podcast.language ?? 'English', podcast.id, apiKey)
+      setError('Finish the live podcast that is currently in progress before opening another episode.')
       return
     }
     if (loadingAudio) return
+    if (mode === 'live' && !podcast.liveAudioAvailable) {
+      setError('This live episode does not have a saved audio recording yet.')
+      return
+    }
     if (playingId === podcast.id) {
       const player = audioRef.current
       if (!player) return
@@ -253,7 +395,7 @@ export function PodcastsPage({
         try {
           await player.play()
         } catch (caughtError) {
-          console.error('Unable to resume Gemini-generated podcast audio.', caughtError)
+          console.error('Unable to resume Speakia AI-generated podcast audio.', caughtError)
           setError('Unable to resume playback. Try using the audio player controls.')
         }
         setIsPaused(false)
@@ -265,7 +407,7 @@ export function PodcastsPage({
       }
       return
     }
-    if (audioSource?.podcastId === podcast.id && audioRef.current) {
+    if (audioSource?.podcastId === podcast.id && audioSource.mode === mode && audioRef.current) {
       const player = audioRef.current
       if (player.ended) player.currentTime = 0
       try {
@@ -273,7 +415,7 @@ export function PodcastsPage({
         setPlayingId(podcast.id)
         setIsPaused(false)
       } catch (caughtError) {
-        console.error('Unable to play saved Gemini podcast audio.', caughtError)
+        console.error('Unable to play saved Speakia AI podcast audio.', caughtError)
         setError('Unable to start playback. Use the audio player controls or try again.')
       }
       return
@@ -283,28 +425,28 @@ export function PodcastsPage({
     setPlayingId(null)
     setIsPaused(false)
     try {
-      let audio = await loadPodcastAudio(podcast.id, 'recorded')
-      if (!audio) {
-        setNotice('Generating Gemini podcast audio for this archived episode…')
+      let audio = await loadPodcastAudio(podcast.id, mode)
+      if (!audio && mode === 'recorded') {
+        setNotice('Generating Speakia AI podcast audio for this archived episode…')
         const playbackModel = podcast.speechModel ?? speechModel
         const useStreaming = podcast.streaming ?? streaming
-        audio = await synthesizePodcastAudio(apiKey, podcast.turns, playbackModel, useStreaming)
+        audio = await synthesizePodcastAudio(apiKey, podcast.turns, playbackModel, useStreaming, podcastHosts(podcast), podcast.language ?? 'English', brandName)
         await savePodcastAudio(podcast.id, audio)
         const nextPodcasts = podcasts.map((episode) => episode.id === podcast.id
           ? { ...episode, audioAvailable: true, speechModel: playbackModel, streaming: useStreaming }
           : episode)
         setPodcasts(nextPodcasts)
         podcastsRef.current = nextPodcasts
-        if (!savePodcasts(username, nextPodcasts)) {
-          setNotice('Gemini audio was generated, but the archive metadata could not be updated.')
+        if (!savePodcasts(username, nextPodcasts, product)) {
+          setNotice(`${brandName} audio was generated, but the archive metadata could not be updated.`)
         } else {
-          setNotice('Gemini audio is ready and saved for future playback.')
+          setNotice(`${brandName} audio is ready and saved for future playback.`)
         }
       }
+      if (!audio) throw new Error('The saved podcast audio is not available for this episode.')
       if (audioSource?.url) URL.revokeObjectURL(audioSource.url)
       const url = URL.createObjectURL(audio)
-      setSelectedId(podcast.id)
-      setAudioSource({ podcastId: podcast.id, url, mode: 'recorded' })
+      setAudioSource({ podcastId: podcast.id, url, mode })
       requestAnimationFrame(() => {
         const player = audioRef.current
         if (!player) return
@@ -316,12 +458,12 @@ export function PodcastsPage({
           setPlayingId(podcast.id)
           setIsPaused(false)
         }).catch((caughtError: unknown) => {
-          console.error('Unable to play Gemini-generated podcast audio.', caughtError)
+          console.error('Unable to play saved Speakia podcast audio.', caughtError)
           setNotice('Audio is ready. Press Play in the audio player to listen.')
         })
       })
     } catch (caughtError) {
-      console.error('Unable to load or generate archived Gemini podcast audio.', caughtError)
+      console.error('Unable to load or generate archived Speakia podcast audio.', caughtError)
       setError(caughtError instanceof Error ? caughtError.message : 'Unable to load this podcast audio.')
     } finally {
       setLoadingAudio(false)
@@ -338,29 +480,14 @@ export function PodcastsPage({
     setNotice('Playback stopped.')
   }
 
-  async function playSavedLiveCapture(podcast: SpeakiaPodcast) {
-    setError('')
-    try {
-      const audio = await loadPodcastAudio(podcast.id, 'live')
-      if (!audio) throw new Error('No live podcast capture has been saved for this episode yet.')
-      if (audioSource?.url) URL.revokeObjectURL(audioSource.url)
-      const url = URL.createObjectURL(audio)
-      setSelectedId(podcast.id)
-      setAudioSource({ podcastId: podcast.id, url, mode: 'live' })
-      requestAnimationFrame(() => {
-        const player = audioRef.current
-        if (!player) return
-        player.src = url
-        player.load()
-        void player.play().catch((caughtError: unknown) => {
-          console.error('Unable to replay the saved live podcast capture.', caughtError)
-          setError('The saved live podcast is ready. Press Play in the audio player to listen.')
-        })
-      })
-    } catch (caughtError) {
-      console.error('Unable to load the saved live podcast capture.', caughtError)
-      setError(caughtError instanceof Error ? caughtError.message : 'Unable to load the saved live podcast capture.')
+  function selectPodcast(podcast: SpeakiaPodcast) {
+    if (playingId && playingId !== podcast.id) {
+      audioRef.current?.pause()
+      if (audioRef.current) audioRef.current.currentTime = 0
+      setPlayingId(null)
+      setIsPaused(false)
     }
+    setSelectedId(podcast.id)
   }
 
   async function sharePodcastWithCoach(podcast: SpeakiaPodcast) {
@@ -385,6 +512,15 @@ export function PodcastsPage({
     setError('')
     setNotice('')
     const selectedTopic = customTopic.trim() || topic
+    const selectedHosts = hosts.map(({ name, gender }) => ({ name: name.trim().slice(0, 40), gender })) as [PodcastHost, PodcastHost]
+    if (selectedHosts.some((host) => !host.name)) {
+      setError('Enter a name for both podcast hosts or choose a preset name.')
+      return
+    }
+    if (selectedHosts[0].name.toLocaleLowerCase() === selectedHosts[1].name.toLocaleLowerCase()) {
+      setError('Choose two different names for your podcast hosts.')
+      return
+    }
     if (playbackMode === 'live') {
       const normalizedTopic = selectedTopic.trim().slice(0, 180)
       if (normalizedTopic.length < 3) {
@@ -397,14 +533,15 @@ export function PodcastsPage({
         topic: normalizedTopic,
         createdAt: new Date().toISOString(),
         durationSeconds: 0,
-        summary: `An unscripted, real-time conversation between Aisha and Noah about ${normalizedTopic}.`,
+        summary: `An unscripted, real-time ${brandName} podcast between ${selectedHosts[0].name} and ${selectedHosts[1].name} about ${normalizedTopic}.`,
         turns: [],
+        hosts: selectedHosts,
         language,
         playbackMode: 'live',
         liveAudioAvailable: false,
       }
       const nextPodcasts = [liveEpisode, ...podcastsRef.current]
-      if (!savePodcasts(username, nextPodcasts)) {
+      if (!savePodcasts(username, nextPodcasts, product)) {
         setError('The live episode could not be added to your archive. Check browser storage space and permissions.')
         return
       }
@@ -412,21 +549,45 @@ export function PodcastsPage({
       setPodcasts(nextPodcasts)
       setSelectedId(liveEpisode.id)
       setCustomTopic('')
-      setNotice('Connecting Aisha and Noah now. Your unscripted live episode will begin as soon as both hosts are ready.')
-      await livePodcast.start(normalizedTopic, language, liveEpisode.id, apiKey)
+      setNotice(`Connecting ${selectedHosts[0].name} and ${selectedHosts[1].name} now. Your unscripted live episode will begin as soon as both hosts are ready.`)
+      const liveLearnerContext = product === 'writia'
+        ? JSON.stringify({
+          learner: { writingTargetBand: profile.writingTargetBand || null, writingTestDate: profile.writingTestDate || null, writingStudyGoal: profile.writingStudyGoal || null },
+          recentWritingAssessments: writingAssessments.slice(0, 5).map(({ taskLabel, overallBand, summary, priority, criteria }) => ({ taskLabel, overallBand, summary, priority, criteria })),
+        })
+        : JSON.stringify({ recentSpeakingAssessments: results.slice(0, 5).map(({ title, overallBand, nextSteps }) => ({ title, overallBand, nextSteps })) })
+      await livePodcast.start(normalizedTopic, language, liveEpisode.id, apiKey, selectedHosts, product, liveLearnerContext, turnCount)
       return
     }
     setGenerating(true)
     try {
-      const generated = await generateSpeakiaPodcast(
-        apiKey,
-        selectedTopic,
-        { profile, results, lexicalEntries, assignments, coachActivity: readCoachActivity() },
-        scriptModel,
-        speechModel,
-        language,
-        streaming,
-      )
+      const generated = product === 'writia'
+        ? await generateWritiaPodcast(
+          apiKey,
+          selectedTopic,
+          {
+            profile,
+            assessments: writingAssessments,
+            assignments: writingAssignments,
+          },
+          scriptModel,
+          speechModel,
+          language,
+          streaming,
+          selectedHosts,
+          turnCount,
+        )
+        : await generateSpeakiaPodcast(
+          apiKey,
+          selectedTopic,
+          { profile, results, lexicalEntries, assignments, coachActivity: readCoachActivity() },
+          scriptModel,
+          speechModel,
+          language,
+          streaming,
+          selectedHosts,
+          turnCount,
+        )
       const { audio, ...podcast } = generated
       let audioAvailable = false
       if (audio) {
@@ -434,12 +595,12 @@ export function PodcastsPage({
           await savePodcastAudio(podcast.id, audio, 'recorded')
           audioAvailable = true
         } catch (caughtError) {
-          console.error('Podcast script generated, but Gemini audio could not be archived.', caughtError)
+          console.error(`${brandName} podcast script generated, but audio could not be archived.`, caughtError)
         }
       }
       const savedPodcast = { ...podcast, audioAvailable }
       const nextPodcasts = [savedPodcast, ...podcasts]
-      if (!savePodcasts(username, nextPodcasts)) {
+      if (!savePodcasts(username, nextPodcasts, product)) {
         if (audioAvailable) {
           try {
             await deletePodcastAudio(savedPodcast.id)
@@ -457,12 +618,12 @@ export function PodcastsPage({
       if (audioSource?.url) URL.revokeObjectURL(audioSource.url)
       setAudioSource(null)
       setNotice(audioAvailable
-        ? 'Your Gemini-voiced episode is ready and saved in your archive.'
-        : 'Your transcript is archived; Gemini audio could not be saved and can be retried from the archive.')
+        ? `Your ${brandName} AI-voiced episode is ready and saved in your archive.`
+        : `Your transcript is archived; ${brandName} AI audio could not be saved and can be retried from the archive.`)
       setCustomTopic('')
     } catch (caughtError) {
-      console.error('Unable to create a Speakia podcast episode.', caughtError)
-      setError(caughtError instanceof Error ? caughtError.message : 'Speakia could not create this episode. Please try again.')
+      console.error(`Unable to create a ${brandName} podcast episode.`, caughtError)
+      setError(caughtError instanceof Error ? caughtError.message : `${brandName} could not create this episode. Please try again.`)
     } finally {
       setGenerating(false)
     }
@@ -470,7 +631,7 @@ export function PodcastsPage({
 
   async function removeEpisode(podcastId: string) {
     const nextPodcasts = podcasts.filter((podcast) => podcast.id !== podcastId)
-    if (!savePodcasts(username, nextPodcasts)) {
+    if (!savePodcasts(username, nextPodcasts, product)) {
       setError('This episode could not be removed from the archive.')
       return
     }
@@ -499,8 +660,10 @@ export function PodcastsPage({
       <div className="inner-page-heading">
         <div>
           <p className="eyebrow">YOUR PERSONAL IELTS AUDIO SHOW</p>
-          <h1>Speakia Podcasts</h1>
-          <p className="page-subtitle">Two AI co-hosts turn your learning progress and IELTS goals into a helpful, listenable conversation.</p>
+          <h1>{brandName} Podcasts</h1>
+          <p className="page-subtitle">{product === 'writia'
+            ? 'Personalized audio lessons turn your writing evidence and goals into a practical coaching conversation and improvement plan.'
+            : 'Two AI co-hosts turn your learning progress and IELTS goals into a helpful, listenable conversation.'}</p>
         </div>
         <div className="podcast-heading-stat"><Headphones size={17} /><strong>{podcasts.length}</strong><span>episodes saved</span></div>
       </div>
@@ -515,7 +678,7 @@ export function PodcastsPage({
             <div className="podcast-create-copy">
               <span className="podcast-kicker"><Sparkles size={13} /> A CONVERSATION ABOUT YOUR LEARNING</span>
               <h2>Create a personalized podcast</h2>
-              <p>Choose a starting point, language, script and speech models, and streaming preference for Aisha and Noah.</p>
+              <p>Choose a topic, two co-hosts, and how you would like to hear your episode.</p>
             </div>
           </summary>
           <div className="podcast-create-content">
@@ -523,7 +686,7 @@ export function PodcastsPage({
             <label htmlFor="podcast-topic">Choose a starting point</label>
             <div className="podcast-topic-row">
               <select id="podcast-topic" value={topic} onChange={(event) => setTopic(event.target.value)}>
-                {podcastTopics.map((item) => <option key={item}>{item}</option>)}
+                {topics.map((item) => <option key={item}>{item}</option>)}
               </select>
               <span>or</span>
               <input aria-label="Custom podcast topic" value={customTopic} onChange={(event) => setCustomTopic(event.target.value)} placeholder="Suggest a topic…" maxLength={180} />
@@ -536,13 +699,45 @@ export function PodcastsPage({
               <label className={playbackMode === 'live' ? 'podcast-playback-choice-active' : ''}>
                 <input type="radio" name="podcast-playback-mode" value="live" checked={playbackMode === 'live'} onChange={() => setPlaybackMode('live')} disabled={livePodcast.state !== 'idle'} />
                 <span className="podcast-playback-choice-icon"><Radio size={17} /></span>
-                <span><strong>Live podcast</strong><small>Two Gemini Live hosts start an unscripted conversation immediately. No script generation and no microphone.</small></span>
+                <span><strong>Live podcast</strong><small>Two {brandName} hosts start an unscripted conversation immediately. No script generation and no microphone.</small></span>
               </label>
               <label className={playbackMode === 'recorded' ? 'podcast-playback-choice-active' : ''}>
                 <input type="radio" name="podcast-playback-mode" value="recorded" checked={playbackMode === 'recorded'} onChange={() => setPlaybackMode('recorded')} disabled={livePodcast.state !== 'idle'} />
                 <span className="podcast-playback-choice-icon"><Headphones size={17} /></span>
-                <span><strong>Recorded podcast</strong><small>Generate a ready-to-replay, two-voice recording with Gemini TTS.</small></span>
+                <span><strong>Recorded podcast</strong><small>Generate a ready-to-replay, two-voice recording with {brandName} voice.</small></span>
               </label>
+            </fieldset>
+            <fieldset className="podcast-host-settings" disabled={generating || livePodcast.state !== 'idle'}>
+              <legend>Choose your podcast hosts</legend>
+              <p>Pick from Pakistani women’s and men’s names, or enter a custom name for either host.</p>
+              <div className="podcast-host-settings-grid">
+                {hosts.map((host, index) => {
+                  const hostIndex = index as 0 | 1
+                  const hostNumber = index + 1
+                  const presets = PODCAST_HOST_PRESETS[host.gender]
+                  const isPreset = presets.includes(host.name)
+                  return <div className="podcast-host-settings-card" key={`podcast-host-${hostNumber}`}>
+                    <strong>Host {hostNumber}</strong>
+                    <label htmlFor={`podcast-host-${hostNumber}-gender`}>Voice
+                      <select id={`podcast-host-${hostNumber}-gender`} value={host.gender} onChange={(event) => {
+                        if (event.target.value === 'female' || event.target.value === 'male') selectHostGender(hostIndex, event.target.value)
+                      }}>
+                        <option value="female">Female</option>
+                        <option value="male">Male</option>
+                      </select>
+                    </label>
+                    <label htmlFor={`podcast-host-${hostNumber}-preset`}>Name
+                      <select id={`podcast-host-${hostNumber}-preset`} value={host.customName || !isPreset ? 'custom' : host.name} onChange={(event) => selectHostPreset(hostIndex, event.target.value)}>
+                        {presets.map((name) => <option key={name} value={name}>{name}</option>)}
+                        <option value="custom">Custom name…</option>
+                      </select>
+                    </label>
+                    {(host.customName || !isPreset) && <label htmlFor={`podcast-host-${hostNumber}-custom`} className="podcast-host-custom-label">Custom host name
+                      <input id={`podcast-host-${hostNumber}-custom`} value={host.name} onChange={(event) => updateHost(hostIndex, { name: event.target.value.slice(0, 40), customName: true })} maxLength={40} placeholder={`Enter Host ${hostNumber}'s name`} required />
+                    </label>}
+                  </div>
+                })}
+              </div>
             </fieldset>
             <div className="podcast-model-row">
               <label htmlFor="podcast-language">
@@ -559,6 +754,20 @@ export function PodcastsPage({
                   {PODCAST_LANGUAGES.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
                 </select>
               </label>
+              <label htmlFor="podcast-turn-count">
+                Number of host turns
+                <select
+                  id="podcast-turn-count"
+                  value={turnCount}
+                  onChange={(event) => {
+                    const selected = PODCAST_TURN_COUNTS.find((count) => count === Number(event.target.value))
+                    if (selected !== undefined) setTurnCount(selected)
+                  }}
+                  disabled={generating}
+                >
+                  {PODCAST_TURN_COUNTS.map((count) => <option key={count} value={count}>{count} turns{count === DEFAULT_PODCAST_TURN_COUNT ? ' · default' : ''}</option>)}
+                </select>
+              </label>
               {playbackMode === 'recorded' && <label htmlFor="podcast-script-model">
                 Script model
                 <select
@@ -570,7 +779,7 @@ export function PodcastsPage({
                   }}
                   disabled={generating}
                 >
-                  {PODCAST_SCRIPT_MODELS.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
+                  {PODCAST_SCRIPT_MODELS.map((model) => <option key={model.id} value={model.id}>{model.label.replace(/^Speakia/, brandName)}</option>)}
                 </select>
               </label>}
               {playbackMode === 'recorded' && <label htmlFor="podcast-speech-model">
@@ -584,7 +793,7 @@ export function PodcastsPage({
                   }}
                   disabled={generating}
                 >
-                  {PODCAST_TTS_MODELS.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}
+                  {PODCAST_TTS_MODELS.map((model) => <option key={model.id} value={model.id}>{model.label.replace(/^Speakia/, brandName)}</option>)}
                 </select>
               </label>}
               {playbackMode === 'recorded' && <label htmlFor="podcast-streaming">
@@ -600,9 +809,10 @@ export function PodcastsPage({
                 </select>
               </label>}
             </div>
-            <p className="podcast-form-hint">{PODCAST_LANGUAGES.find((option) => option.id === language)?.description} {playbackMode === 'live' ? 'Aisha and Noah connect directly to Gemini Live and start talking about your topic without a generated script. No microphone is needed.' : streaming ? 'Streaming mode requests headerless 24 kHz PCM chunks and packages them as WAV for playback and archiving.' : 'Gemini TTS generates a complete two-voice WAV recording for playback and archiving.'} {playbackMode === 'recorded' ? 'A podcast script is generated before recording.' : 'Only the topic and selected language are sent as live-session context.'} Podcasts are archived in this browser.</p>
-            {!apiKey.trim() && <p className="podcast-form-hint">Add your Gemini API key in Settings to create a personalized episode.</p>}
-            {results.length === 0 && <p className="podcast-form-hint">No saved practice assessments yet. Your first episode will focus on Speakia resources and general IELTS guidance.</p>}
+            <p className="podcast-form-hint">{PODCAST_LANGUAGES.find((option) => option.id === language)?.description} {playbackMode === 'live' ? `${hosts[0].name || 'Host 1'} and ${hosts[1].name || 'Host 2'} connect directly to ${brandName} Live and start talking about your topic without a generated script. No microphone is needed.` : streaming ? 'Streaming mode requests headerless 24 kHz PCM chunks and packages them as WAV for playback and archiving.' : `${brandName} voice generates a complete two-voice WAV recording for playback and archiving.`} {playbackMode === 'recorded' ? 'A podcast script is generated before recording.' : 'The topic, host names, language, and relevant learner context are sent to the live hosts.'} The selected episode will contain {turnCount} host turns. Podcasts are archived in this browser.</p>
+            {!apiKey.trim() && <p className="podcast-form-hint">Add your shared AI key in Settings to create a personalized episode.</p>}
+            {product === 'writia' && writingAssessments.length === 0 && <p className="podcast-form-hint">No saved writing assessments yet. Your first episode will focus on your writing goals, useful Writia workflows, and general IELTS Writing guidance.</p>}
+            {product === 'speakia' && results.length === 0 && <p className="podcast-form-hint">No saved practice assessments yet. Your first episode will focus on Speakia resources and general IELTS guidance.</p>}
           </form>
           </div>
         </details>
@@ -618,11 +828,11 @@ export function PodcastsPage({
           </div>
           <Card className="podcast-player-card">
             <div className="podcast-player-top">
-              <span className={`podcast-host-avatar podcast-host-aisha ${livePodcast.activeSpeaker === 'Aisha' ? 'podcast-host-speaking' : ''}`}>A</span>
-              <span className={`podcast-host-avatar podcast-host-noah ${livePodcast.activeSpeaker === 'Noah' ? 'podcast-host-speaking' : ''}`}>N</span>
-              <div className="podcast-player-description"><span>AISHA & NOAH · YOUR SPEAKIA CO-HOSTS</span><strong>{selectedPodcast.topic}</strong><p>{selectedPodcast.summary}</p></div>
+              <span className={`podcast-host-avatar podcast-host-aisha ${livePodcast.activeSpeaker === selectedPodcastHosts[0].name ? 'podcast-host-speaking' : ''}`} title={selectedPodcastHosts[0].name}>{selectedPodcastHosts[0].name.slice(0, 1).toLocaleUpperCase()}</span>
+              <span className={`podcast-host-avatar podcast-host-noah ${livePodcast.activeSpeaker === selectedPodcastHosts[1].name ? 'podcast-host-speaking' : ''}`} title={selectedPodcastHosts[1].name}>{selectedPodcastHosts[1].name.slice(0, 1).toLocaleUpperCase()}</span>
+              <div className="podcast-player-description"><span>{selectedPodcastHosts[0].name.toLocaleUpperCase()} &amp; {selectedPodcastHosts[1].name.toLocaleUpperCase()} · YOUR {brandName.toLocaleUpperCase()} CO-HOSTS</span><strong>{selectedPodcast.topic}</strong><p>{selectedPodcast.summary}</p></div>
               <div className="podcast-player-controls">
-                <button className="podcast-play-button" aria-label={loadingAudio || livePodcast.state === 'connecting' ? 'Preparing podcast playback' : livePodcast.state === 'live' ? 'Stop live podcast' : playingId === selectedPodcast.id ? (isPaused ? 'Resume podcast' : 'Pause podcast') : selectedPodcast.playbackMode === 'live' ? 'Start live podcast' : 'Play recorded podcast'} title={loadingAudio || livePodcast.state === 'connecting' ? 'Preparing podcast playback' : livePodcast.state === 'live' ? 'Stop live podcast' : playingId === selectedPodcast.id ? (isPaused ? 'Resume podcast' : 'Pause podcast') : selectedPodcast.playbackMode === 'live' ? 'Start live podcast' : 'Play recorded podcast'} disabled={loadingAudio || livePodcast.state === 'saving'} onClick={() => void playPodcast(selectedPodcast)}>
+                <button className="podcast-play-button" aria-label={loadingAudio || livePodcast.state === 'connecting' ? 'Preparing podcast playback' : livePodcast.state === 'live' ? 'Stop live podcast' : playingId === selectedPodcast.id ? (isPaused ? 'Resume podcast' : 'Pause podcast') : selectedPodcast.playbackMode === 'live' ? (selectedPodcast.liveAudioAvailable ? 'Play saved live podcast' : 'Start live podcast') : 'Play recorded podcast'} title={loadingAudio || livePodcast.state === 'connecting' ? 'Preparing podcast playback' : livePodcast.state === 'live' ? 'Stop live podcast' : playingId === selectedPodcast.id ? (isPaused ? 'Resume podcast' : 'Pause podcast') : selectedPodcast.playbackMode === 'live' ? (selectedPodcast.liveAudioAvailable ? 'Play saved live podcast' : 'Start live podcast') : 'Play recorded podcast'} disabled={loadingAudio || livePodcast.state === 'saving'} onClick={() => void playPodcast(selectedPodcast)}>
                   {loadingAudio || livePodcast.state === 'connecting' || livePodcast.state === 'saving' ? <LoaderCircle className="podcast-spin" size={18} /> : livePodcast.state === 'live' ? <Square size={16} fill="currentColor" /> : playingId === selectedPodcast.id && !isPaused ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
                 </button>
                 {playingId === selectedPodcast.id && <button className="podcast-stop-button" aria-label="Stop podcast" title="Stop episode" onClick={stopPlayback}><Square size={15} fill="currentColor" /></button>}
@@ -630,9 +840,8 @@ export function PodcastsPage({
             </div>
             {(selectedPodcast.playbackMode ?? 'recorded') === 'live' && (
               <div className="podcast-live-controls">
-                <span className={`podcast-live-badge ${livePodcast.state === 'live' ? 'podcast-live-badge-active' : ''}`}><i />{livePodcast.state === 'connecting' ? 'CONNECTING LIVE HOSTS' : livePodcast.state === 'saving' ? 'SAVING LIVE CAPTURE' : livePodcast.state === 'live' ? 'LIVE ON AIR' : 'GEMINI LIVE PODCAST'}</span>
+                <span className={`podcast-live-badge ${livePodcast.state === 'live' ? 'podcast-live-badge-active' : ''}`}><i />{livePodcast.state === 'connecting' ? 'CONNECTING LIVE HOSTS' : livePodcast.state === 'saving' ? 'SAVING LIVE CAPTURE' : livePodcast.state === 'live' ? 'LIVE ON AIR' : `${brandName.toLocaleUpperCase()} LIVE PODCAST`}</span>
                 {livePodcast.state !== 'idle' && <span className="podcast-live-meta"><Clock3 size={13} /> {Math.floor(livePodcast.elapsedSeconds / 60)}:{String(livePodcast.elapsedSeconds % 60).padStart(2, '0')} · {livePodcast.activeSpeaker ? `${livePodcast.activeSpeaker} speaking` : 'Next host preparing'} · {Math.max(0, livePodcast.turnIndex + 1)} / {livePodcast.totalTurns} turns</span>}
-                {selectedPodcast.liveAudioAvailable && <Button type="button" variant="outline" onClick={() => void playSavedLiveCapture(selectedPodcast)}><Play size={14} /> Replay saved live audio</Button>}
                 {livePodcast.error && <p className="podcast-alert podcast-alert-error" role="alert">{livePodcast.error}</p>}
               </div>
             )}
@@ -642,7 +851,7 @@ export function PodcastsPage({
               controls
               preload="metadata"
               src={audioSource?.podcastId === selectedPodcast.id && audioSource.mode === (selectedPodcast.playbackMode ?? 'recorded') ? audioSource.url : undefined}
-              aria-label={`${audioSource?.podcastId === selectedPodcast.id && audioSource.mode === 'live' ? 'Saved live' : 'Gemini-generated'} podcast audio: ${selectedPodcast.title}`}
+              aria-label={`${audioSource?.podcastId === selectedPodcast.id && audioSource.mode === 'live' ? 'Saved live' : 'Speakia AI-generated'} podcast audio: ${selectedPodcast.title}`}
               onPlay={() => { setPlayingId(selectedPodcast.id); setIsPaused(false) }}
               onPause={() => {
                 if (audioRef.current && !audioRef.current.ended && audioRef.current.currentTime > 0) setIsPaused(true)
@@ -655,20 +864,20 @@ export function PodcastsPage({
               onDurationChange={() => setPlaybackDuration(audioRef.current?.duration || selectedPodcast.durationSeconds)}
               onError={() => {
                 if (audioSource?.podcastId === selectedPodcast.id) {
-                  setError('The archived Gemini audio could not be played. Try generating audio again from this episode.')
+                  setError(`The archived ${brandName} audio could not be played. Try generating audio again from this episode.`)
                   setPlayingId(null)
                   setIsPaused(false)
                 }
               }}
             />
             {(selectedPodcast.playbackMode ?? 'recorded') === 'recorded'
-              ? <p className="podcast-playback-note"><Volume2 size={13} />Speech: {PODCAST_TTS_MODELS.find((model) => model.id === selectedPodcast.speechModel)?.label ?? 'model not recorded for this older episode'} · Script: {PODCAST_SCRIPT_MODELS.find((model) => model.id === selectedPodcast.scriptModel)?.label ?? 'model not recorded'} · Two distinct voices. Audio is archived for replay.</p>
-              : <p className="podcast-playback-note"><Radio size={13} />Unscripted live conversation · Gemini Live · {selectedPodcast.language ?? 'English'} · No microphone needed.</p>}
-            {selectedPodcast.playbackMode !== 'live' && !selectedPodcast.audioAvailable && <p className="podcast-form-hint">Gemini audio is not yet saved for this episode. Press Play to generate and archive it now.</p>}
-            {((selectedPodcast.playbackMode ?? 'recorded') === 'live' ? selectedPodcast.liveAudioAvailable : selectedPodcast.audioAvailable) && <div className="podcast-coach-share"><Button type="button" variant="outline" size="sm" disabled={sharingPodcastAudio} onClick={() => void sharePodcastWithCoach(selectedPodcast)}>{sharingPodcastAudio ? <LoaderCircle className="podcast-spin" size={14} /> : <MessageCircle size={14} />} Discuss recording with Coach</Button><span>Speakia Coach will listen to this episode in a live conversation.</span></div>}
+              ? <p className="podcast-playback-note"><Volume2 size={13} />Speech: {PODCAST_TTS_MODELS.find((model) => model.id === selectedPodcast.speechModel)?.label.replace(/^Speakia/, brandName) ?? 'model not recorded for this older episode'} · Script: {PODCAST_SCRIPT_MODELS.find((model) => model.id === selectedPodcast.scriptModel)?.label.replace(/^Speakia/, brandName) ?? 'model not recorded'} · Two distinct voices. Audio is archived for replay.</p>
+              : <p className="podcast-playback-note"><Radio size={13} />Unscripted live conversation · {brandName} Live · {selectedPodcast.language ?? 'English'} · No microphone needed.</p>}
+            {selectedPodcast.playbackMode !== 'live' && !selectedPodcast.audioAvailable && <p className="podcast-form-hint">{brandName} audio is not yet saved for this episode. Press Play to generate and archive it now.</p>}
+            {((selectedPodcast.playbackMode ?? 'recorded') === 'live' ? selectedPodcast.liveAudioAvailable : selectedPodcast.audioAvailable) && <div className="podcast-coach-share"><Button type="button" variant="outline" size="sm" disabled={sharingPodcastAudio} onClick={() => void sharePodcastWithCoach(selectedPodcast)}>{sharingPodcastAudio ? <LoaderCircle className="podcast-spin" size={14} /> : <MessageCircle size={14} />} {sharingPodcastAudio ? 'Preparing audio…' : `Ask ${brandName}`}</Button><span>{brandName} Coach will listen to this episode in a live conversation.</span></div>}
             {playingId === selectedPodcast.id && <div className="podcast-progress" role="status"><span style={{ width: `${Math.min(100, Math.round(playbackTime / Math.max(playbackDuration, 1) * 100))}%` }} /><small>{formatDuration(Math.max(0, playbackDuration - playbackTime))} remaining</small></div>}
           </Card>
-          <div className="podcast-transcript">
+          <div className="podcast-transcript" ref={podcastTranscriptRef}>
             <div className="podcast-transcript-heading"><h3><AudioLines size={17} /> Live conversation transcript</h3><span>{selectedPodcastTurns.length} turns</span></div>
             {selectedPodcastTurns.length
               ? selectedPodcastTurns.map((turn, index) => {
@@ -681,16 +890,16 @@ export function PodcastsPage({
                   ? transcriptPositionAtTime(selectedPodcastTurns, playbackTime, playbackDuration)
                   : null
                 const activeWordIndex = liveActive
-                  ? wordIndexAtElapsed(turn.text, livePodcast.speechElapsedSeconds)
+                  ? wordIndexAtElapsed(turn.text, livePodcast.speechElapsedSeconds, turn.audioDurationSeconds)
                   : playbackPosition?.turnIndex === index ? playbackPosition.wordIndex : -1
                 return (
-                  <article className={`podcast-turn podcast-turn-${turn.speaker.toLocaleLowerCase()} ${liveActive || playbackPosition?.turnIndex === index ? 'podcast-turn-active' : ''}`} key={`${selectedPodcast.id}-${index}`}>
-                    <span className="podcast-turn-avatar">{turn.speaker === 'Aisha' ? 'A' : 'N'}</span>
-                    <div><strong>{turn.speaker}</strong><p><SpeechHighlight text={turn.text} wordIndex={activeWordIndex} /></p></div>
+                  <article className={`podcast-turn podcast-turn-${index % 2 === 0 ? 'host-one' : 'host-two'} ${liveActive || playbackPosition?.turnIndex === index ? 'podcast-turn-active' : ''}`} key={`${selectedPodcast.id}-${index}`}>
+                    <span className="podcast-turn-avatar">{turn.speaker.slice(0, 1).toLocaleUpperCase()}</span>
+                    <div><strong>{turn.speaker}</strong><p><SpeechHighlight text={turn.text} wordIndex={activeWordIndex} search={transcriptMatchPodcast?.id === selectedPodcast.id ? query : ''} focusSearchMatch={transcriptMatchPodcast?.id === selectedPodcast.id} /></p></div>
                   </article>
                 )
               })
-              : <p className="podcast-form-hint">{livePodcast.state === 'connecting' ? 'The hosts will speak here when the live connection is ready.' : 'Start the live episode to listen to Aisha and Noah improvise a conversation around this topic.'}</p>}
+              : <p className="podcast-form-hint">{livePodcast.state === 'connecting' ? 'The hosts will speak here when the live connection is ready.' : `Start the live episode to listen to ${selectedPodcastHosts[0].name} and ${selectedPodcastHosts[1].name} improvise a conversation around this topic.`}</p>}
           </div>
         </section>
       )}
@@ -698,7 +907,18 @@ export function PodcastsPage({
       <section className="podcast-archive-section" aria-label="Podcast archive">
         <div className="podcast-section-heading">
           <div><p className="eyebrow">YOUR LISTENING LIBRARY</p><h2>Podcast archive</h2></div>
-          {podcasts.length > 0 && <label className="podcast-search"><Search size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search episodes" aria-label="Search podcast archive" /></label>}
+          {podcasts.length > 0 && <label className="podcast-search"><Search size={15} /><input value={query} onChange={(event) => {
+            const nextQuery = event.target.value
+            const terms = nextQuery.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
+            setQuery(nextQuery)
+            if (!terms.length) return
+            const match = podcasts.find((podcast) => {
+              const transcript = podcast.turns.map((turn) => turn.text).join(' ').toLocaleLowerCase()
+              return (archiveModeFilter === 'all' || (podcast.playbackMode ?? 'recorded') === archiveModeFilter)
+                && terms.every((term) => transcript.includes(term))
+            })
+            if (match) setSelectedId(match.id)
+          }} placeholder="Search episodes" aria-label="Search podcast archive" /></label>}
         </div>
         {podcasts.length > 0 && <div className="podcast-archive-filters" role="group" aria-label="Filter podcast archive by playback mode">
           {([
@@ -712,10 +932,10 @@ export function PodcastsPage({
             {filteredPodcasts.map((podcast) => (
               <Card className={`podcast-archive-item ${selectedId === podcast.id ? 'podcast-archive-item-active' : ''}`} key={podcast.id}>
                 <span className="podcast-archive-icon"><BookOpen size={18} /></span>
-                <button className="podcast-archive-copy" disabled={livePodcast.state !== 'idle'} onClick={() => { if (playingId && playingId !== podcast.id) stopPlayback(); setSelectedId(podcast.id); setError(''); setNotice('') }}>
+                <button className="podcast-archive-copy" disabled={livePodcast.state !== 'idle'} onClick={() => selectPodcast(podcast)}>
                   <strong>{podcast.title}</strong><span>{podcast.topic}</span><small><i className={`podcast-archive-mode-icon ${podcast.playbackMode === 'live' ? 'podcast-archive-mode-live' : ''}`}>{podcast.playbackMode === 'live' ? 'LIVE' : 'RECORDED'}</i> · {formatEpisodeDate(podcast.createdAt)} · {podcast.durationSeconds ? `${formatDuration(podcast.durationSeconds)} · ` : ''}{podcast.turns.length} dialogue turns</small>
                 </button>
-                <button className="podcast-archive-play" aria-label={`${podcast.playbackMode === 'live' ? 'Start live' : 'Play'} ${podcast.title}`} title={`${podcast.playbackMode === 'live' ? 'Start live' : 'Play'} ${podcast.title}`} disabled={livePodcast.state !== 'idle' && (livePodcast.state === 'saving' || podcast.id !== selectedPodcast?.id)} onClick={() => { setSelectedId(podcast.id); void playPodcast(podcast) }}>
+                <button className="podcast-archive-play" aria-label={`Play ${podcast.playbackMode === 'live' ? 'saved live recording of ' : ''}${podcast.title}`} title={`Play ${podcast.playbackMode === 'live' ? 'saved live recording' : 'recorded episode'}`} disabled={livePodcast.state !== 'idle' && (livePodcast.state === 'saving' || podcast.id !== selectedPodcast?.id)} onClick={() => { setSelectedId(podcast.id); void playPodcast(podcast) }}>
                   {playingId === podcast.id && !isPaused ? <Pause size={16} /> : <Play size={16} />}
                 </button>
                 <button className="podcast-archive-delete" aria-label={`Remove ${podcast.title}`} title="Remove from archive" disabled={livePodcast.state !== 'idle'} onClick={() => removeEpisode(podcast.id)}>×</button>

@@ -1,4 +1,6 @@
-import { GoogleGenAI, Type, type FunctionDeclaration } from '@google/genai'
+import { Type, type FunctionDeclaration } from '@google/genai'
+import { GoogleGenAI } from '@/lib/geminiClient'
+import { getProdiaTextModel } from '@/lib/geminiModels'
 
 export interface InteractiveLesson {
   id: string
@@ -61,14 +63,17 @@ export async function createInteractiveLesson(
   apiKey: string,
   rawArgs: Record<string, unknown>,
   learnerContext: unknown,
-  model = 'gemini-2.5-flash',
+  model: string = getProdiaTextModel(),
+  abortSignal?: AbortSignal,
+  lessonType: 'speaking' | 'writing' = 'speaking',
 ): Promise<InteractiveLesson> {
-  if (!apiKey.trim()) throw new Error('Add your Gemini API key in Settings to create an interactive lesson.')
+  if (!apiKey.trim()) throw new Error('Add your Speakia AI key in Settings to create an interactive lesson.')
   if (!isRecord(rawArgs)) throw new Error('The lesson request was incomplete. Please try again.')
   const request = boundedText(rawArgs.request, '', 800)
   if (request.length < 3) throw new Error('Tell Speakia what topic or skill you want the lesson to cover.')
-  const topic = boundedText(rawArgs.topic, 'IELTS Speaking', 120)
-  const focus = boundedText(rawArgs.focus, 'speaking fluency and clear ideas', 160)
+  const skillName = lessonType === 'writing' ? 'Writing' : 'Speaking'
+  const topic = boundedText(rawArgs.topic, `IELTS ${skillName}`, 120)
+  const focus = boundedText(rawArgs.focus, lessonType === 'writing' ? 'task analysis and clear writing' : 'speaking fluency and clear ideas', 160)
   const part = rawArgs.part === 'part1' || rawArgs.part === 'part2' || rawArgs.part === 'part3' ? rawArgs.part : 'choose the most relevant part'
   const level = boundedText(rawArgs.level, 'infer an appropriate level from the learner context', 120)
   const client = new GoogleGenAI({ apiKey: apiKey.trim() })
@@ -82,20 +87,21 @@ export async function createInteractiveLesson(
           lessonRequest: request,
           topic,
           targetFocus: focus,
-          speakingPart: part,
+          [lessonType === 'writing' ? 'writingTaskPart' : 'speakingPart']: part,
           level,
         }),
       }],
     }],
     config: {
       responseMimeType: 'text/plain',
-      systemInstruction: `Create a complete, polished, adaptive and immediately usable HTML5 lesson for IELTS Speaking. Return ONLY the complete HTML document (doctype, html, head, body). The host will render this document in a sandboxed iframe with scripts enabled but no network access, same-origin access, forms, popups, or top navigation. Therefore use only inline CSS and inline JavaScript: no external scripts, stylesheets, libraries, fonts, fetch, or network calls.
+      abortSignal,
+      systemInstruction: `Create a complete, polished, adaptive and immediately usable HTML5 lesson for IELTS ${lessonType === 'writing' ? 'Writing' : 'Speaking'}. Return ONLY the complete HTML document (doctype, html, head, body). The host will render this document in a sandboxed iframe with scripts enabled but no network access, same-origin access, forms, popups, or top navigation. Therefore use only inline CSS and inline JavaScript: no external scripts, stylesheets, libraries, fonts, fetch, or network calls.
 
-Build an engaging but readable responsive mini-learning experience with a clear lesson goal, concise teaching, realistic IELTS examples, definitions where useful, scaffolded practice, and at least two meaningful interactions (such as a quiz with feedback, revealable examples, a vocabulary exercise, answer builder, or timed speaking prompt). Provide instant feedback and a visible completion action. Include semantic HTML, keyboard-friendly controls, accessible labels, adequate contrast and mobile-friendly typography. Adapt the difficulty and examples to the supplied learner context and focus on useful IELTS Speaking practice, not generic filler. Do not include markdown fences. When possible mark completion buttons with data-speakia-action="complete" and hint buttons with data-speakia-action="hint". Keep the complete HTML under 70 KB. The page must work offline within the iframe.`,
+Build an engaging but readable responsive mini-learning experience with a clear lesson goal, concise teaching, realistic IELTS examples, definitions where useful, scaffolded practice, and at least two meaningful interactions (such as a quiz with feedback, revealable examples, a vocabulary exercise, answer builder, or skill-specific practice). Provide instant feedback and a visible completion action. Include semantic HTML, keyboard-friendly controls, accessible labels, adequate contrast and mobile-friendly typography. Adapt the difficulty and examples to the supplied learner context and focus on useful IELTS ${lessonType === 'writing' ? 'Writing practice' : 'Speaking practice'}, not generic filler. Do not include markdown fences. When possible mark completion buttons with data-speakia-action="complete" and hint buttons with data-speakia-action="hint". Keep the complete HTML under 70 KB. The page must work offline within the iframe. ${lessonType === 'writing' ? 'Use task-appropriate writing practice: task analysis, idea development, paragraph organization, precise vocabulary, grammar editing, guided revision, and transfer into a new writing context. Include short writing inputs with feedback rather than asking the learner to write a full essay. Never rewrite a complete response or treat an AI practice estimate as an official IELTS score.' : ''}`,
     },
   })
   const rawHtml = response.text?.trim()
-  if (!rawHtml) throw new Error('Gemini returned an empty lesson. Please try again.')
+  if (!rawHtml) throw new Error('Speakia returned an empty lesson. Please try again.')
   const id = crypto.randomUUID()
   const html = createSandboxedDocument(rawHtml, id)
   const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.replace(/<[^>]*>/g, '').trim().slice(0, 100)

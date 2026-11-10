@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { motion } from 'framer-motion'
 import { ArrowRight, AudioLines, BookOpen, Check, Clock3, LoaderCircle, MessageCircle, Mic2, RefreshCw, Sparkles, Target } from 'lucide-react'
 import {
@@ -20,6 +20,7 @@ import { groupTranscriptTurns } from './transcript'
 import { loadAssessmentLesson, loadConversationAudioCopy, loadTestRecording, saveAssessmentLesson } from './recordingStorage'
 import { InlineInteractiveLesson } from '@/features/assistant/InlineInteractiveLesson'
 import { shareAudioWithCoach } from '@/features/assistant/audioSharing'
+import { formatAssessmentDuration, getAssessmentModelLabel } from './assessmentDuration'
 import type { InteractiveLesson } from '@/features/assistant/interactiveLesson'
 import type { CriterionResult, TestResult } from './types'
 import { ASSESSMENT_MODELS, type AssessmentModel } from './gemini'
@@ -59,22 +60,58 @@ function formatDate(date: string): string {
   }).format(new Date(date))
 }
 
-export function AssessmentView({ result, results, onSelect, onPractice, apiKey, assessmentModel, onAssessmentModelChange, onReassess }: {
+export function AssessmentView({ result, results, onSelect, onPractice, onOpenBandDescriptors, apiKey, assessmentModel, onAssessmentModelChange, onReassess, compact = false, autoReassessRequestId = '' }: {
   result: TestResult | null
   results: TestResult[]
-  onSelect: (result: TestResult) => void
+  onSelect?: (result: TestResult) => void
   onPractice: () => void
+  onOpenBandDescriptors: (criterion: string, band: number) => void
   apiKey: string
   assessmentModel: AssessmentModel
   onAssessmentModelChange: (value: AssessmentModel) => void
   onReassess: (result: TestResult, model: AssessmentModel) => Promise<void>
+  compact?: boolean
+  autoReassessRequestId?: string
 }) {
   const isSmallViewport = useSmallViewport()
   const [reassessing, setReassessing] = useState(false)
   const [reassessmentError, setReassessmentError] = useState('')
+  const [reassessmentElapsedMs, setReassessmentElapsedMs] = useState(0)
+  const [reassessmentStartedAt, setReassessmentStartedAt] = useState<number | null>(null)
   const [loadedAssessmentLesson, setLoadedAssessmentLesson] = useState<{ testId: string; version?: string; lesson: InteractiveLesson } | null>(null)
   const [assessmentLessonLoadError, setAssessmentLessonLoadError] = useState<{ testId: string; version?: string; message: string } | null>(null)
   const [assessmentLessonProgressError, setAssessmentLessonProgressError] = useState<{ testId: string; version?: string; message: string } | null>(null)
+  const handledAutoReassessRef = useRef('')
+
+  useEffect(() => {
+    if (!reassessing || reassessmentStartedAt === null) return
+    const updateElapsed = () => setReassessmentElapsedMs(performance.now() - reassessmentStartedAt)
+    const intervalId = window.setInterval(updateElapsed, 250)
+    return () => window.clearInterval(intervalId)
+  }, [reassessing, reassessmentStartedAt])
+
+  const reassessRecording = useCallback(async () => {
+    if (!result) return
+    setReassessmentStartedAt(performance.now())
+    setReassessmentElapsedMs(0)
+    setReassessing(true)
+    setReassessmentError('')
+    try {
+      await onReassess(result, assessmentModel)
+    } catch (error) {
+      console.error(`Unable to reassess the saved recording for test ${result.id}.`, error)
+      setReassessmentError(error instanceof Error ? error.message : 'The saved recording could not be reassessed.')
+    } finally {
+      setReassessing(false)
+      setReassessmentStartedAt(null)
+    }
+  }, [assessmentModel, onReassess, result])
+
+  useEffect(() => {
+    if (!autoReassessRequestId || handledAutoReassessRef.current === autoReassessRequestId) return
+    handledAutoReassessRef.current = autoReassessRequestId
+    void reassessRecording()
+  }, [autoReassessRequestId, reassessRecording])
 
   useEffect(() => {
     let isCurrent = true
@@ -125,6 +162,7 @@ export function AssessmentView({ result, results, onSelect, onPractice, apiKey, 
     }
   }, [assessmentLesson, result])
   if (!result) {
+    if (compact) return null
     return (
       <div className="page-content inner-page evaluation-empty-page">
         <div className="inner-page-heading">
@@ -153,43 +191,29 @@ export function AssessmentView({ result, results, onSelect, onPractice, apiKey, 
     type: criterion.assessmentType,
   }))
 
-  async function reassessRecording() {
-    if (!result) return
-    setReassessing(true)
-    setReassessmentError('')
-    try {
-      await onReassess(result, assessmentModel)
-    } catch (error) {
-      console.error(`Unable to reassess the saved recording for test ${result.id}.`, error)
-      setReassessmentError(error instanceof Error ? error.message : 'The saved recording could not be reassessed.')
-    } finally {
-      setReassessing(false)
-    }
-  }
-
   return (
-    <div className="page-content inner-page evaluation-page">
-      <div className="inner-page-heading">
+    <div className={compact ? 'evaluation-embedded' : 'page-content inner-page evaluation-page'}>
+      {!compact && <div className="inner-page-heading">
         <div><p className="eyebrow">YOUR FEEDBACK, AT A GLANCE</p><h1>Assessments</h1><p className="page-subtitle">Review the feedback from each of your {results.length} completed {results.length === 1 ? 'test' : 'tests'}.</p></div>
         <Button className="start-button" onClick={onPractice}><Mic2 size={17} /> Practice again</Button>
-      </div>
+      </div>}
 
-      <section className="evaluation-library" aria-label="Your speaking assessments">
+      {!compact && <section className="evaluation-library" aria-label="Your speaking assessments">
         <div className="evaluation-library-heading"><div><p className="section-kicker">YOUR TESTS</p><h2>Choose an assessment</h2></div><span>{results.length} {results.length === 1 ? 'assessment' : 'assessments'}</span></div>
         <div className="evaluation-library-list">
-          {results.map((item) => <button key={item.id} className={`evaluation-result-option ${item.id === result.id ? 'evaluation-result-selected' : ''}`} aria-pressed={item.id === result.id} onClick={() => onSelect(item)}>
+          {results.map((item) => <button key={item.id} className={`evaluation-result-option ${item.id === result.id ? 'evaluation-result-selected' : ''}`} aria-pressed={item.id === result.id} onClick={() => onSelect?.(item)}>
             <span className="evaluation-result-copy"><strong>{item.title}</strong><small>{item.part === 'full' ? 'Full test' : item.part.replace('part', 'Part ')} · {formatDate(item.completedAt)}</small></span>
             <span className="evaluation-result-score">{item.overallBand.toFixed(1)}<small>/9</small></span>
           </button>)}
         </div>
-      </section>
+      </section>}
 
       <section className="evaluation-executive-summary" aria-labelledby="evaluation-summary-heading">
         <div className="evaluation-summary-mark"><Sparkles size={19} /></div>
         <div className="evaluation-summary-copy">
-          <div className="evaluation-summary-title"><div><p className="section-kicker">SPEAKIA AI EXAMINER · PERFORMANCE OVERVIEW</p><h2 id="evaluation-summary-heading">Executive summary</h2></div><Badge className="gemini-assessment-badge">AI-generated</Badge></div>
+          <div className="evaluation-summary-title"><div><p className="section-kicker">SPEAKIA AI EXAMINER · PERFORMANCE OVERVIEW</p><h2 id="evaluation-summary-heading">Executive summary</h2></div><Badge className="speakia-assessment-badge">AI-generated</Badge></div>
           <p>{result.executiveSummary || 'An executive summary is not available for this older assessment. Reassess the saved recording to generate an updated report.'}</p>
-          <small>{formatDate(result.completedAt)} <span aria-hidden="true">·</span> {result.part === 'full' ? 'Full speaking test' : result.part.replace('part', 'Part ')} <span aria-hidden="true">·</span> Practice estimate, not an official IELTS result</small>
+          <small>{formatDate(result.completedAt)} <span aria-hidden="true">·</span> {result.part === 'full' ? 'Full speaking test' : result.part.replace('part', 'Part ')} <span aria-hidden="true">·</span> Practice estimate, not an official IELTS result <span aria-hidden="true">·</span> Model: {getAssessmentModelLabel(result.assessmentModel)}{result.assessmentDurationMs !== undefined && <> <span aria-hidden="true">·</span> Assessment generated in {formatAssessmentDuration(result.assessmentDurationMs)}</>}</small>
         </div>
       </section>
       <Card className="evaluation-hero">
@@ -197,7 +221,7 @@ export function AssessmentView({ result, results, onSelect, onPractice, apiKey, 
           <span className="section-kicker">PRACTICE ESTIMATE</span>
           <strong>{result.overallBand.toFixed(1)}<small> / 9</small></strong>
           <Badge>Indicative only</Badge>
-          <p>Overall band returned by Gemini from the session recording.</p>
+          <p>Overall band estimated by Speakia from the session recording.</p>
         </div>
         <div className="evaluation-bars-wrap" role="img" aria-label="Vertical bar chart of IELTS speaking scores for Fluency and Coherence, Lexical Resource, Grammatical Range and Accuracy, and Pronunciation.">
           <ResponsiveContainer width="100%" height="100%">
@@ -223,8 +247,8 @@ export function AssessmentView({ result, results, onSelect, onPractice, apiKey, 
               <motion.div key={criterion.id} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: index * 0.07 }}>
                 <Card className="criterion-card">
                   <span className="criterion-icon" style={{ color: criterionColors[criterion.id], backgroundColor: `${criterionColors[criterion.id]}18` }}><Icon size={19} /></span>
-                  <div className="criterion-info"><div className="criterion-title-row"><strong>{criterion.name}</strong>                  <Badge className="gemini-assessment-badge">{criterion.assessmentType}</Badge></div><p>{criterion.note}</p></div>
-                  <strong className="criterion-score">{criterion.band.toFixed(1)}<small>/9</small></strong>
+                  <div className="criterion-info"><div className="criterion-title-row"><strong>{criterion.name}</strong>                  <Badge className="speakia-assessment-badge">{criterion.assessmentType}</Badge></div><p>{criterion.note}</p></div>
+                  <div className="criterion-score-group"><strong className="criterion-score">{criterion.band.toFixed(1)}<small>/9</small></strong><button type="button" className="criterion-descriptor-link" onClick={() => onOpenBandDescriptors(criterion.id, Math.round(criterion.band))}>Understand this band <BookOpen size={13} /></button></div>
                 </Card>
               </motion.div>
             )
@@ -244,8 +268,8 @@ export function AssessmentView({ result, results, onSelect, onPractice, apiKey, 
           <label htmlFor="reassessment-model">Assessment model<select id="reassessment-model" className="settings-select" value={assessmentModel} onChange={(event) => {
             const model = ASSESSMENT_MODELS.find((item) => item.id === event.target.value)
             if (model) onAssessmentModelChange(model.id)
-          }}>{ASSESSMENT_MODELS.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}</select></label>
-          <Button className="start-button" onClick={() => void reassessRecording()} disabled={reassessing || !apiKey.trim() || !(result.audioAvailable || result.audioCopyAvailable)}>{reassessing ? <LoaderCircle className="spin-icon" size={16} /> : <RefreshCw size={16} />}{reassessing ? 'Reassessing audio…' : 'Reassess audio'}</Button>
+          }}>{ASSESSMENT_MODELS.map((model) => <option key={model.id} value={model.id}>{model.label} · {model.description}</option>)}</select></label>
+          <Button className="start-button" onClick={() => void reassessRecording()} disabled={reassessing || !apiKey.trim() || !(result.audioAvailable || result.audioCopyAvailable)}>{reassessing ? <LoaderCircle className="spin-icon" size={16} /> : <RefreshCw size={16} />}{reassessing ? `Reassessing audio · ${formatAssessmentDuration(reassessmentElapsedMs)}` : 'Reassess audio'}</Button>
           {!(result.audioAvailable || result.audioCopyAvailable) && <small className="evaluation-reassess-note">The original recording is not available for this assessment.</small>}
           {reassessmentError && <p className="evaluation-reassess-error" role="alert">{reassessmentError}</p>}
         </section>
@@ -270,7 +294,7 @@ export function AssessmentView({ result, results, onSelect, onPractice, apiKey, 
         <div className="evaluation-section-heading"><div><p className="section-kicker">DETAILED LANGUAGE REVIEW</p><h2 id="evaluation-sentence-feedback-heading">Sentence-by-sentence feedback</h2></div><span>{result.sentenceFeedback?.length ?? 0} sentences reviewed</span></div>
         <SentenceFeedbackList items={result.sentenceFeedback ?? []} />
       </section>
-      <p className="evaluation-disclaimer">Gemini assessed this practice recording using the public IELTS speaking criteria. Scores and feedback are AI-generated learning estimates, not official IELTS results or a substitute for a certified examiner. Audio is processed in your browser and sent to Google Gemini for assessment.</p>
+      <p className="evaluation-disclaimer">Speakia assessed this practice recording using the public IELTS speaking criteria. Scores and feedback are AI-generated learning estimates, not official IELTS results or a substitute for a certified examiner. Audio is processed in your browser and sent to the connected AI service for assessment.</p>
     </div>
   )
 }
@@ -317,7 +341,7 @@ function AssessmentAudioPlayer({ testId, title }: { testId: string; title: strin
     <Card className="evaluation-audio-card">
       <span className="history-recording-icon"><AudioLines size={19} /></span>
       <div className="evaluation-audio-copy"><span className="section-kicker">SESSION AUDIO</span><strong>{title}</strong><small>{audioKind === 'copy' ? 'Compiled examiner and candidate conversation' : audioKind === 'recording' ? 'Original session recording' : error || 'Loading saved session audio…'}</small></div>
-      {audioUrl && <div className="evaluation-audio-actions"><audio controls preload="metadata" src={audioUrl} aria-label={`Audio for ${title}`} /><Button type="button" variant="outline" size="sm" disabled={!audioBlob} onClick={() => { if (audioBlob) shareAudioWithCoach(audioBlob, title) }}><MessageCircle size={14} /> Discuss with Coach</Button></div>}
+      {audioUrl && <div className="evaluation-audio-actions"><audio controls preload="metadata" src={audioUrl} aria-label={`Audio for ${title}`} /><Button type="button" variant="outline" size="sm" disabled={!audioBlob} onClick={() => { if (audioBlob) shareAudioWithCoach(audioBlob, title) }}><MessageCircle size={14} /> Ask Speakia</Button></div>}
       {error && <p className="history-audio-error" role="status">{error}</p>}
     </Card>
   )

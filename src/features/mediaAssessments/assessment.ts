@@ -1,7 +1,11 @@
-import { GoogleGenAI } from '@google/genai'
+import { GoogleGenAI } from '@/lib/geminiClient'
 import type { CriterionId, SentenceFeedback } from '@/features/simulator/types'
 
-export type MediaAssessmentModel = 'gemini-3.8-flash' | 'gemini-3.1-pro-preview'
+export type MediaAssessmentModel =
+  | 'gemini-3.8-flash'
+  | 'gemini-3.5-flash-lite'
+  | 'gemini-3.1-pro-preview'
+  | 'gemini-pro-latest'
 export type MediaAssessmentSource = 'audio' | 'youtube'
 
 export interface MediaAssessmentCriterion {
@@ -12,6 +16,11 @@ export interface MediaAssessmentCriterion {
   improvement: string
 }
 
+export interface MediaTranscriptTurn {
+  speaker: 'examiner' | 'candidate'
+  text: string
+}
+
 export interface MediaAssessment {
   id: string
   source: MediaAssessmentSource
@@ -20,11 +29,12 @@ export interface MediaAssessment {
   audioAvailable?: boolean
   model: MediaAssessmentModel
   completedAt: string
+  durationMs?: number
   overallBand: number
   criteria: MediaAssessmentCriterion[]
   strengths: string[]
   nextSteps: string[]
-  transcript: string
+  transcript: MediaTranscriptTurn[] | string
   sentenceFeedback?: SentenceFeedback[]
   cleanupWarning?: string
 }
@@ -59,6 +69,13 @@ function isSentenceFeedback(value: unknown): value is SentenceFeedback {
     && typeof value.explanation === 'string'
 }
 
+function isMediaTranscriptTurn(value: unknown): value is MediaTranscriptTurn {
+  return isRecord(value)
+    && (value.speaker === 'examiner' || value.speaker === 'candidate')
+    && typeof value.text === 'string'
+    && value.text.trim().length > 0
+}
+
 function roundBand(value: number): number {
   return Math.max(0, Math.min(9, Math.round(value * 2) / 2))
 }
@@ -69,18 +86,25 @@ function parseAssessment(text: string): Omit<MediaAssessment, 'id' | 'source' | 
   try {
     parsed = JSON.parse(json)
   } catch (error) {
-    console.error('Gemini returned invalid JSON for the media IELTS assessment.', error)
-    throw new Error('Gemini returned an unreadable assessment. Try assessing the media again.')
+    console.error('Speakia AI returned invalid JSON for the media IELTS assessment.', error)
+    throw new Error('Speakia AI returned an unreadable assessment. Try assessing the media again.')
   }
   if (!isRecord(parsed)
     || typeof parsed.overallBand !== 'number'
     || !Number.isFinite(parsed.overallBand)
     || parsed.overallBand < 0 || parsed.overallBand > 9
     || !Array.isArray(parsed.criteria) || !Array.isArray(parsed.strengths)
-    || !Array.isArray(parsed.nextSteps) || typeof parsed.transcript !== 'string'
+    || !Array.isArray(parsed.nextSteps) || !Array.isArray(parsed.transcriptTurns)
     || !Array.isArray(parsed.sentenceFeedback)) {
-    throw new Error('Gemini returned an incomplete assessment. Try assessing the media again.')
+    throw new Error('Speakia AI returned an incomplete assessment. Try assessing the media again.')
   }
+  if (!parsed.transcriptTurns.every(isMediaTranscriptTurn)) {
+    throw new Error('Speakia AI returned an invalid conversation transcript. Try the assessment again.')
+  }
+  const transcriptTurns: MediaTranscriptTurn[] = parsed.transcriptTurns.map((turn) => ({
+    speaker: turn.speaker,
+    text: turn.text,
+  }))
 
   const criteria: MediaAssessmentCriterion[] = []
   for (const item of parsed.criteria) {
@@ -88,7 +112,7 @@ function parseAssessment(text: string): Omit<MediaAssessment, 'id' | 'source' | 
       || typeof item.id !== 'string' || !criterionIds.has(item.id as CriterionId)
       || typeof item.band !== 'number' || !Number.isFinite(item.band) || item.band < 0 || item.band > 9
       || typeof item.evidence !== 'string' || typeof item.improvement !== 'string') {
-      throw new Error('Gemini returned an invalid criterion. Try the assessment again.')
+      throw new Error('Speakia AI returned an invalid criterion. Try the assessment again.')
     }
     const id = item.id as CriterionId
     criteria.push({
@@ -100,14 +124,14 @@ function parseAssessment(text: string): Omit<MediaAssessment, 'id' | 'source' | 
     })
   }
   if (criteria.length !== 4 || new Set(criteria.map((item) => item.id)).size !== 4) {
-    throw new Error('Gemini did not return all four IELTS speaking criteria. Try again.')
+    throw new Error('Speakia AI did not return all four IELTS speaking criteria. Try again.')
   }
   if (!parsed.strengths.every((item) => typeof item === 'string')
     || !parsed.nextSteps.every((item) => typeof item === 'string')) {
-    throw new Error('Gemini returned invalid feedback. Try again.')
+    throw new Error('Speakia AI returned invalid feedback. Try again.')
   }
   if (parsed.sentenceFeedback.length > 80 || !parsed.sentenceFeedback.every(isSentenceFeedback)) {
-    throw new Error('Gemini returned invalid sentence-by-sentence feedback. Try again.')
+    throw new Error('Speakia AI returned invalid sentence-by-sentence feedback. Try again.')
   }
 
   return {
@@ -115,7 +139,7 @@ function parseAssessment(text: string): Omit<MediaAssessment, 'id' | 'source' | 
     criteria,
     strengths: parsed.strengths.slice(0, 6),
     nextSteps: parsed.nextSteps.slice(0, 6),
-    transcript: parsed.transcript,
+    transcript: transcriptTurns,
     sentenceFeedback: parsed.sentenceFeedback,
   }
 }
@@ -134,6 +158,17 @@ function audioMimeType(file: File): string {
     webm: 'audio/webm',
   }
   return extension ? knownTypes[extension] ?? '' : ''
+}
+
+function isModelUnavailableError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return /model.{0,100}(not found|not available|not supported|invalid)|(?:not found|not available|not supported).{0,100}model/i.test(message)
+}
+
+function modelCandidates(model: MediaAssessmentModel): MediaAssessmentModel[] {
+  if (model === 'gemini-3.1-pro-preview') return [model, 'gemini-pro-latest']
+  if (model === 'gemini-pro-latest') return [model, 'gemini-3.1-pro-preview']
+  return [model]
 }
 
 export function normalizeYouTubeUrl(value: string): string {
@@ -172,15 +207,16 @@ function promptFor(source: MediaAssessmentSource): string {
     'If there is an interviewer, distinguish the interviewer from the candidate and score only the candidate. For video, use visuals only as context to distinguish speakers; never score appearance, identity, or visual presentation.',
     'Give a whole or half IELTS band from 0 to 9 for each criterion. The overall band must be the arithmetic mean rounded to the nearest half band.',
     'For each criterion, cite specific audible evidence and provide one actionable improvement. Do not invent speech or claim certainty when the audio is unclear.',
-    'Also provide feedback, in transcript order, for every complete candidate sentence and clear candidate sentence fragment. Preserve each intelligible original sentence, identify real errors or say no major issue, provide a corrected natural version that keeps the intended meaning, an illustrative Band 8-style alternative (not a guaranteed score), and a brief explanation. Never invent a candidate sentence or assess interviewer speech.',
-    'Include a faithful transcript of the candidate speech only; mark unclear sections rather than guessing. If the media does not contain enough candidate speech to assess a criterion, say so in its evidence and avoid fabricating performance.',
+    'Provide concise sentence feedback for up to 25 representative candidate sentences across the recording, prioritizing clear errors. Preserve the original wording, identify the issue, give a natural correction, a concise illustrative Band 8-style alternative (not a guaranteed score), and a brief explanation. Never invent a candidate sentence or assess interviewer speech.',
+    `Transcribe the ${source === 'youtube' ? 'YouTube video' : 'audio recording'} verbatim as ordered speaker turns, including candidate/respondent and interviewer/examiner wherever present. Do not summarize, paraphrase, clean up grammar, or omit filler words, repetitions, or false starts. Use speaker "candidate" for the person answering and "examiner" for the interviewer/questioner/host. Mark genuinely unintelligible words as [unintelligible] rather than guessing. Cover all audible speech, not only candidate answers.`,
+    'Assess only candidate/respondent turns. Do not invent speech or claim certainty when the audio is unclear. If the media does not contain enough candidate speech to assess a criterion, say so in its evidence and avoid fabricating performance.',
     'Return constructive, detailed feedback and a concise set of strengths and next steps. This is a practice estimate, not an official IELTS score.',
-    'Return one valid JSON object with keys overallBand (number), criteria (array of exactly four objects with id, band, evidence, improvement), strengths (string array), nextSteps (string array), transcript (string), and sentenceFeedback (array of at most 80 objects with originalSentence, issue, correction, bandEightVersion, explanation). Use criterion ids fluency, lexical, grammar, and pronunciation. Do not include markdown fences or extra text.',
+    'Return one valid JSON object with keys overallBand (number), criteria (array of exactly four objects with id, band, evidence, improvement), strengths (string array), nextSteps (string array), transcriptTurns (array of ordered objects with speaker ("examiner" or "candidate") and text), and sentenceFeedback (array of at most 25 objects with originalSentence, issue, correction, bandEightVersion, explanation). Keep feedback concise. Include every audible spoken turn in transcriptTurns without combining separate speaker turns. Use criterion ids fluency, lexical, grammar, and pronunciation. Do not include markdown fences or extra text.',
   ].join('\n')
 }
 
 export async function assessMedia(input: AssessmentInput): Promise<MediaAssessment> {
-  if (!input.apiKey.trim()) throw new Error('Add your Gemini API key before starting an assessment.')
+  if (!input.apiKey.trim()) throw new Error('Add your Speakia AI API key before starting an assessment.')
 
   const client = new GoogleGenAI({ apiKey: input.apiKey.trim() })
   const sourceName = input.source === 'audio' ? input.file?.name : input.youtubeUrl
@@ -202,42 +238,50 @@ export async function assessMedia(input: AssessmentInput): Promise<MediaAssessme
         file,
         config: { displayName: file.name, mimeType },
       })
-      if (!uploaded.uri) throw new Error('Gemini uploaded the audio but did not return a usable file URI.')
+      if (!uploaded.uri) throw new Error('Speakia AI uploaded the audio but did not return a usable file URI.')
       uploadedFileName = uploaded.name
-      if (!uploadedFileName) cleanupWarning = 'Gemini did not return a file name, so the uploaded audio could not be explicitly removed.'
+      if (!uploadedFileName) cleanupWarning = 'Speakia AI did not return a file name, so the uploaded audio could not be explicitly removed.'
       mediaInput = { type: 'audio', uri: uploaded.uri, mime_type: uploaded.mimeType ?? mimeType }
     } else {
       const youtubeUrl = normalizeYouTubeUrl(input.youtubeUrl ?? '')
       mediaInput = { type: 'video', uri: youtubeUrl }
     }
 
-    const mediaPart = mediaInput.type === 'video'
-      ? { fileData: { fileUri: mediaInput.uri, mimeType: 'video/mp4' } }
-      : { fileData: { fileUri: mediaInput.uri, mimeType: mediaInput.mime_type } }
-    const response = await client.models.generateContent({
-      model: input.model,
-      contents: [{
-        role: 'user',
-        parts: [
-          { text: promptFor(input.source) },
-          mediaPart,
-        ],
-      }],
-      config: {
-        temperature: 0.2,
-        responseMimeType: 'application/json',
-      },
-    })
-    if (!response.text?.trim()) throw new Error('Gemini returned an empty assessment. Try again.')
+    let response: Awaited<ReturnType<typeof client.interactions.create>> | undefined
+    let usedModel = input.model
+    const candidates = modelCandidates(input.model)
+    for (const [index, candidate] of candidates.entries()) {
+      try {
+        response = await client.interactions.create({
+          model: candidate,
+          stream: false,
+          input: [
+            { type: 'text', text: promptFor(input.source) },
+            mediaInput,
+          ],
+          generation_config: { temperature: 0.2 },
+          response_format: { type: 'text', mime_type: 'application/json' },
+        })
+        usedModel = candidate
+        break
+      } catch (error) {
+        if (index === candidates.length - 1 || !isModelUnavailableError(error)) throw error
+        console.warn(`Media assessment model ${candidate} is unavailable; trying ${candidates[index + 1]}.`, error)
+      }
+    }
+    const outputText = response && isRecord(response) && typeof response.output_text === 'string'
+      ? response.output_text
+      : ''
+    if (!outputText.trim()) throw new Error('Speakia AI returned an empty assessment. Try again.')
 
-    const details = parseAssessment(response.text)
+    const details = parseAssessment(outputText)
     assessment = {
       ...details,
       id: crypto.randomUUID(),
       source: input.source,
       sourceName,
       ...(input.source === 'youtube' ? { sourceUrl: input.youtubeUrl } : {}),
-      model: input.model,
+      model: usedModel,
       completedAt: new Date().toISOString(),
     }
   } catch (error) {
@@ -248,8 +292,8 @@ export async function assessMedia(input: AssessmentInput): Promise<MediaAssessme
       try {
         await client.files.delete({ name: uploadedFileName })
       } catch (error) {
-        console.warn('Unable to remove the uploaded audio from Gemini file storage.', error)
-        cleanupWarning = 'Gemini could not confirm removal of the uploaded audio file. Check your Google AI file storage.'
+        console.warn('Unable to remove the uploaded audio from Speakia AI file storage.', error)
+        cleanupWarning = 'Speakia AI could not confirm removal of the uploaded audio file. Check your your AI provider AI file storage.'
       }
     }
   }

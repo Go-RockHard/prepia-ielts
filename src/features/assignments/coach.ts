@@ -1,4 +1,4 @@
-import { GoogleGenAI } from '@google/genai'
+import { GoogleGenAI } from '@/lib/geminiClient'
 import type { TestResult } from '@/features/simulator/types'
 import type { UserProfile } from '@/features/profile/localAccount'
 import type { AssistantModel } from '@/features/assistant/models'
@@ -78,7 +78,7 @@ export async function chooseTomorrowAssignment(
   model: AssistantModel,
   recentAssignments: CoachAssignment[],
 ): Promise<CoachAssignment> {
-  if (!apiKey.trim()) throw new Error('Add your Gemini API key in Settings before asking Speakia to choose an assignment.')
+  if (!apiKey.trim()) throw new Error('Add your Speakia AI API key in Settings before asking Speakia to choose an assignment.')
   const client = new GoogleGenAI({ apiKey: apiKey.trim() })
   const response = await client.models.generateContent({
     model,
@@ -87,9 +87,11 @@ export async function chooseTomorrowAssignment(
       parts: [{
         text: JSON.stringify({
           learner: {
-            targetBand: profile.targetBand || null,
+            speakingTargetBand: profile.speakingTargetBand || profile.targetBand || null,
+            writingTargetBand: profile.writingTargetBand || null,
             testType: profile.testType,
-            studyGoal: profile.studyGoal || null,
+            speakingStudyGoal: profile.speakingStudyGoal || profile.studyGoal || null,
+            writingStudyGoal: profile.writingStudyGoal || null,
           },
           recentPractice: recentResults.slice(0, 5).map((result) => ({
             completedAt: result.completedAt,

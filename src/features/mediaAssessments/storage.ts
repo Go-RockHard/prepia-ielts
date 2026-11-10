@@ -6,6 +6,14 @@ const MEDIA_DATABASE_VERSION = 1
 const MEDIA_STORE_NAME = 'sources'
 const criterionIds = ['fluency', 'lexical', 'grammar', 'pronunciation']
 
+function isTranscriptTurn(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null) return false
+  const turn = value as { speaker?: unknown; text?: unknown }
+  return (turn.speaker === 'examiner' || turn.speaker === 'candidate')
+    && typeof turn.text === 'string'
+    && turn.text.trim().length > 0
+}
+
 function isMediaAssessment(value: unknown): value is MediaAssessment {
   if (typeof value !== 'object' || value === null) return false
   const item = value as Partial<MediaAssessment>
@@ -14,8 +22,12 @@ function isMediaAssessment(value: unknown): value is MediaAssessment {
     && typeof item.sourceName === 'string'
     && (item.sourceUrl === undefined || typeof item.sourceUrl === 'string')
     && (item.audioAvailable === undefined || typeof item.audioAvailable === 'boolean')
-    && (item.model === 'gemini-3.8-flash' || item.model === 'gemini-3.1-pro-preview')
+    && (item.model === 'gemini-3.8-flash'
+      || item.model === 'gemini-3.5-flash-lite'
+      || item.model === 'gemini-3.1-pro-preview'
+      || item.model === 'gemini-pro-latest')
     && typeof item.completedAt === 'string' && Number.isFinite(Date.parse(item.completedAt))
+    && (item.durationMs === undefined || (typeof item.durationMs === 'number' && Number.isFinite(item.durationMs) && item.durationMs >= 0))
     && typeof item.overallBand === 'number' && Number.isFinite(item.overallBand) && item.overallBand >= 0 && item.overallBand <= 9
     && Array.isArray(item.criteria) && item.criteria.length === 4
     && item.criteria.every((criterion) =>
@@ -27,7 +39,8 @@ function isMediaAssessment(value: unknown): value is MediaAssessment {
     )
     && Array.isArray(item.strengths) && item.strengths.every((entry) => typeof entry === 'string')
     && Array.isArray(item.nextSteps) && item.nextSteps.every((entry) => typeof entry === 'string')
-    && typeof item.transcript === 'string'
+    && (typeof item.transcript === 'string'
+      || (Array.isArray(item.transcript) && item.transcript.every(isTranscriptTurn)))
     && (item.sentenceFeedback === undefined
       || (Array.isArray(item.sentenceFeedback) && item.sentenceFeedback.every((entry) =>
         typeof entry === 'object' && entry !== null

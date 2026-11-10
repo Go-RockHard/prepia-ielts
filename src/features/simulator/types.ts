@@ -18,7 +18,7 @@ export interface CriterionResult {
   id: CriterionId
   name: string
   band: number
-  assessmentType: 'Gemini audio assessment'
+  assessmentType: 'Speakia audio assessment' | 'Gemini audio assessment'
   note: string
 }
 
@@ -27,7 +27,9 @@ export interface TranscriptEntry {
   role: 'examiner' | 'candidate' | 'assessment'
   text: string
   audio?: Blob
+  audioOrder?: number
   source?: 'text'
+  finished?: boolean
 }
 
 export interface SentenceFeedback {
@@ -55,6 +57,7 @@ export interface TestResult {
   audioAvailable?: boolean
   audioCopyAvailable?: boolean
   assessmentModel?: string
+  assessmentDurationMs?: number
   assessmentLessonAvailable?: boolean
   assessmentLessonVersion?: string
 }

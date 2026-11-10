@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import { GoogleGenAI, Modality, type LiveServerMessage, type Session } from '@google/genai'
+import { Modality, type LiveServerMessage, type Session } from '@google/genai'
+import { GoogleGenAI } from '@/lib/geminiClient'
+import { getProdiaLiveModel } from '@/lib/geminiModels'
 import { mergeTranscriptText } from '@/features/simulator/transcript'
-import type { PodcastLanguage, PodcastTurn } from './types'
+import { DEFAULT_PODCAST_TURN_COUNT, PODCAST_TURN_COUNTS, type PodcastHost, type PodcastLanguage, type PodcastProduct, type PodcastTurn } from './types'
 
 export type LivePodcastState = 'idle' | 'connecting' | 'live' | 'saving'
-export type LivePodcastSpeaker = PodcastTurn['speaker'] | null
-
-const MAX_LIVE_TURNS = 12
+export type LivePodcastSpeaker = string | null
+type LivePodcastHostSlot = 'host1' | 'host2'
 
 function base64ToArrayBuffer(base64: string): ArrayBuffer {
   const binary = atob(base64)
@@ -53,29 +54,41 @@ function pcmChunksToWav(chunks: Uint8Array[], sampleRate = 24000): Blob | null {
   return new Blob([header, pcm], { type: 'audio/wav' })
 }
 
-function liveHostInstructions(speaker: PodcastTurn['speaker'], language: PodcastLanguage, topic: string): string {
+function liveHostInstructions(host: PodcastHost, cohost: PodcastHost, language: PodcastLanguage, topic: string, brand: string, learnerContext: string): string {
   const languageInstruction = language === 'Code Switching'
-    ? 'Speak naturally while blending English, Urdu, and Punjabi throughout the conversation.'
-    : `Speak the entire conversation in ${language}.`
-  const persona = speaker === 'Aisha'
-    ? 'You are Aisha, the warm, encouraging, insightful host of Speakia Podcasts. Open the episode immediately with a lively welcome, introduce the topic, and share a useful first perspective. Invite Noah to add his perspective.'
-    : 'You are Noah, the curious, energetic IELTS speaking strategist co-host. Build on Aisha’s opening with concrete examples, practical advice, and natural conversational warmth.'
-  return `${persona}\nThis is a live, unscripted podcast conversation between two independent AI hosts for an IELTS Speaking learner. Focus the episode on: "${topic}". ${languageInstruction}\nSpeak only your own podcast turn, about 2–4 natural sentences. Do not say speaker labels, stage directions, or mention that you are an AI. Never claim learner results or personal activity you have not been given. Alternate naturally: respond to the previous host's actual point, add a distinct useful idea, and hand the conversation back to the other host with a relevant question or invitation. Keep the episode engaging, coherent, and useful.`
+    ? 'Speak naturally while blending English, Pakistani Urdu, and Pakistani Punjabi throughout the conversation. Use Pakistani Urdu vocabulary and pronunciation (not Hindi) and Pakistani Punjabi vocabulary and pronunciation (not Indian Punjabi).'
+    : language === 'Urdu'
+      ? 'Speak the entire conversation in natural Pakistani Urdu, using Pakistani vocabulary, idiom, and pronunciation (not Hindi).'
+      : language === 'Punjabi'
+        ? 'Speak the entire conversation in natural Pakistani Punjabi, using Pakistani vocabulary and pronunciation (not Indian Punjabi).'
+        : 'Speak the entire conversation in English.'
+  const persona = host.name === cohost.name
+    ? `You are ${host.name}, one of the two warm, thoughtful hosts of ${brand} Podcasts.`
+    : `You are ${host.name}, a warm, insightful Pakistani host of ${brand} Podcasts. Speak with a distinct personality and share useful IELTS guidance.`
+  const role = host.name === cohost.name
+    ? 'Open the episode immediately with a lively welcome, introduce the topic, and share a useful first perspective.'
+    : ''
+  const genderContext = host.gender === 'female' ? 'Use a natural feminine voice.' : 'Use a natural masculine voice.'
+  const skill = brand === 'Writia' ? 'IELTS Writing' : 'IELTS Speaking'
+  return `${persona} ${role} ${genderContext}\nThis is a live, unscripted podcast conversation between two independent AI hosts, ${host.name} and ${cohost.name}, for an ${skill} learner. Focus the episode on: "${topic}". ${languageInstruction} When writing Urdu, use Urdu Perso-Arabic script; when writing Punjabi, use Shahmukhi script. Learner goals and recent skill-specific evidence (JSON): ${learnerContext || '(No recent assessment context supplied.)'}\nSpeak only your own podcast turn, about 2–4 natural sentences. Do not say speaker labels, stage directions, or mention that you are an AI. Never claim learner results or personal activity you have not been given. Alternate naturally: respond to the previous host's actual point, add a distinct useful idea, and hand the conversation back to ${cohost.name} with a relevant question or invitation. Keep the episode engaging, coherent, and useful.`
 }
 
 function hostTurnPrompt(
-  speaker: PodcastTurn['speaker'],
+  speaker: string,
+  cohost: string,
   topic: string,
   previousTurn: PodcastTurn | undefined,
   turnNumber: number,
+  totalTurns: number,
+  brand: string,
 ): string {
   if (!previousTurn) {
-    return `Start speaking now. Welcome the listener to Speakia Podcasts and begin an unscripted episode about "${topic}". Open with a concise hook, then share your first useful insight and invite Noah to build on it.`
+    return `You are ${speaker}. Start speaking now. Welcome the listener to ${brand} Podcasts and begin an unscripted episode about "${topic}". Open with a concise hook, then share your first useful insight and invite ${cohost} to build on it.`
   }
-  if (turnNumber >= MAX_LIVE_TURNS) {
+  if (turnNumber >= totalTurns) {
     return `This is the final turn. Respond briefly and naturally to ${previousTurn.speaker}'s actual point, give one useful final takeaway about "${topic}", and warmly sign off the episode.`
   }
-  return `Continue the live podcast about "${topic}". ${previousTurn.speaker} just said: "${previousTurn.text}" Respond directly to that point, add a fresh practical insight, and naturally invite ${speaker === 'Aisha' ? 'Noah' : 'Aisha'} to continue.`
+  return `Continue the live podcast about "${topic}". ${previousTurn.speaker} just said: "${previousTurn.text}" Respond directly to that point, add a fresh practical insight, and naturally invite ${cohost} to continue.`
 }
 
 export function useLivePodcast(onEpisodeComplete: (podcastId: string, audio: Blob, turns: PodcastTurn[], durationSeconds: number) => Promise<void>) {
@@ -89,7 +102,7 @@ export function useLivePodcast(onEpisodeComplete: (podcastId: string, audio: Blo
   const [speechElapsedSeconds, setSpeechElapsedSeconds] = useState(0)
   const [error, setError] = useState('')
   const stateRef = useRef<LivePodcastState>('idle')
-  const sessionsRef = useRef<Record<PodcastTurn['speaker'], Session | null>>({ Aisha: null, Noah: null })
+  const sessionsRef = useRef<Record<LivePodcastHostSlot, Session | null>>({ host1: null, host2: null })
   const audioContextRef = useRef<AudioContext | null>(null)
   const sourcesRef = useRef<AudioBufferSourceNode[]>([])
   const chunksRef = useRef<Uint8Array[]>([])
@@ -105,10 +118,17 @@ export function useLivePodcast(onEpisodeComplete: (podcastId: string, audio: Blo
   const turnsRef = useRef<PodcastTurn[]>([])
   const podcastIdRef = useRef('')
   const turnIndexRef = useRef(-1)
+  const totalTurnsRef = useRef(DEFAULT_PODCAST_TURN_COUNT)
   const turnTextRef = useRef('')
   const startedAtRef = useRef(0)
   const topicRef = useRef('')
   const languageRef = useRef<PodcastLanguage>('English')
+  const hostsRef = useRef<[PodcastHost, PodcastHost]>([
+    { name: 'Aisha', gender: 'female' },
+    { name: 'Hamza', gender: 'male' },
+  ])
+  const productRef = useRef<string>('Speakia')
+  const learnerContextRef = useRef('')
   const onEpisodeCompleteRef = useRef(onEpisodeComplete)
   const finishRef = useRef<(save: boolean) => Promise<void>>(async () => {})
 
@@ -120,16 +140,19 @@ export function useLivePodcast(onEpisodeComplete: (podcastId: string, audio: Blo
   }, [state])
   useEffect(() => {
     if (state !== 'live') return
-    const timer = window.setInterval(() => {
+    let frame = 0
+    const updateClock = () => {
       const context = audioContextRef.current
       const startAt = activeAudioStartRef.current
       setSpeechElapsedSeconds(context && startAt !== null
         ? Math.max(0, context.currentTime - startAt)
         : 0)
-    }, 60)
-    return () => window.clearInterval(timer)
+      frame = window.requestAnimationFrame(updateClock)
+    }
+    frame = window.requestAnimationFrame(updateClock)
+    return () => window.cancelAnimationFrame(frame)
   }, [state])
-  useEffect(() => () => { void finishRef.current(false) }, [])
+  useEffect(() => () => { void finishRef.current(chunksRef.current.length > 0) }, [])
 
   function setCurrentState(next: LivePodcastState) {
     stateRef.current = next
@@ -168,11 +191,14 @@ export function useLivePodcast(onEpisodeComplete: (podcastId: string, audio: Blo
 
   function sendTurn(index: number) {
     if (!activeRef.current) return
-    if (index >= MAX_LIVE_TURNS) {
+    if (index >= totalTurnsRef.current) {
       void finishRef.current(true)
       return
     }
-    const speaker: PodcastTurn['speaker'] = index % 2 === 0 ? 'Aisha' : 'Noah'
+    const hostSlot: LivePodcastHostSlot = index % 2 === 0 ? 'host1' : 'host2'
+    const hostIndex = hostSlot === 'host1' ? 0 : 1
+    const speaker = hostsRef.current[hostIndex].name
+    const cohost = hostsRef.current[hostIndex === 0 ? 1 : 0].name
     const previousTurn = turnsRef.current[turnsRef.current.length - 1]
     turnIndexRef.current = index
     setTurnIndex(index)
@@ -181,7 +207,7 @@ export function useLivePodcast(onEpisodeComplete: (podcastId: string, audio: Blo
     turnCompleteRef.current = false
     advancingRef.current = false
     turnTextRef.current = ''
-    const session = sessionsRef.current[speaker]
+    const session = sessionsRef.current[hostSlot]
     if (!session) {
       setError(`The live ${speaker} host is not connected.`)
       void finishRef.current(false)
@@ -190,7 +216,7 @@ export function useLivePodcast(onEpisodeComplete: (podcastId: string, audio: Blo
     session.sendClientContent({
       turns: [{
         role: 'user',
-        parts: [{ text: hostTurnPrompt(speaker, topicRef.current, previousTurn, index + 1) }],
+        parts: [{ text: hostTurnPrompt(speaker, cohost, topicRef.current, previousTurn, index + 1, totalTurnsRef.current, productRef.current) }],
       }],
       turnComplete: true,
     })
@@ -223,8 +249,9 @@ export function useLivePodcast(onEpisodeComplete: (podcastId: string, audio: Blo
     }, 180)
   }
 
-  function handleMessage(speaker: PodcastTurn['speaker'], message: LiveServerMessage) {
-    if (!activeRef.current || speaker !== (turnIndexRef.current % 2 === 0 ? 'Aisha' : 'Noah')) return
+  function handleMessage(hostSlot: LivePodcastHostSlot, message: LiveServerMessage) {
+    if (!activeRef.current || hostSlot !== (turnIndexRef.current % 2 === 0 ? 'host1' : 'host2')) return
+    const speaker = hostsRef.current[hostSlot === 'host1' ? 0 : 1].name
     const content = message.serverContent
     if (!content) return
     if (content.outputTranscription?.text) {
@@ -247,7 +274,7 @@ export function useLivePodcast(onEpisodeComplete: (podcastId: string, audio: Blo
         if (activeAudioStartRef.current === null) activeAudioStartRef.current = startAt
         pendingAudioRef.current += 1
         chunksRef.current.push(new Uint8Array(pcm).slice())
-        turnAudioDurationSecondsRef.current += pcm.byteLength / 48000
+        turnAudioDurationSecondsRef.current += buffer.duration
         sourcesRef.current.push(source)
         source.onended = () => {
           sourcesRef.current = sourcesRef.current.filter((item) => item !== source)
@@ -286,7 +313,7 @@ export function useLivePodcast(onEpisodeComplete: (podcastId: string, audio: Blo
     }
     sourcesRef.current = []
     Object.values(sessionsRef.current).forEach((session) => session?.close())
-    sessionsRef.current = { Aisha: null, Noah: null }
+    sessionsRef.current = { host1: null, host2: null }
     const context = audioContextRef.current
     audioContextRef.current = null
     if (context && context.state !== 'closed') {
@@ -306,7 +333,7 @@ export function useLivePodcast(onEpisodeComplete: (podcastId: string, audio: Blo
         setError(caughtError instanceof Error ? caughtError.message : 'The live podcast finished, but its audio could not be saved.')
       }
     } else if (save) {
-      setError('The live podcast ended without any audio to save. Check Gemini Live model access and try again.')
+      setError('The live podcast ended without any audio to save. Check Speakia AI Live model access and try again.')
     }
     pendingAudioRef.current = 0
     turnCompleteRef.current = false
@@ -318,22 +345,30 @@ export function useLivePodcast(onEpisodeComplete: (podcastId: string, audio: Blo
   }
   useEffect(() => { finishRef.current = finishPodcast })
 
-  async function start(topic: string, language: PodcastLanguage, podcastId: string, apiKey: string): Promise<void> {
+  async function start(topic: string, language: PodcastLanguage, podcastId: string, apiKey: string, hosts: [PodcastHost, PodcastHost], product: PodcastProduct = 'speakia', learnerContext = '', totalTurns = DEFAULT_PODCAST_TURN_COUNT): Promise<void> {
     if (stateRef.current !== 'idle' || activeRef.current) return
     if (!apiKey.trim()) {
-      setError('Add your Gemini API key in Settings before starting a live podcast.')
+      setError(`Add your shared AI key in Settings before starting a live ${product === 'writia' ? 'Writia' : 'Speakia'} podcast.`)
       return
     }
     if (topic.trim().length < 3) {
       setError('Choose a podcast topic before starting a live episode.')
       return
     }
+    if (!PODCAST_TURN_COUNTS.some((count) => count === totalTurns)) {
+      setError('Choose a supported number of turns before starting a live podcast.')
+      return
+    }
     setError('')
     turnsRef.current = []
     setTurns([])
-    setTotalTurns(MAX_LIVE_TURNS)
+    totalTurnsRef.current = totalTurns
+    setTotalTurns(totalTurns)
     topicRef.current = topic.trim().slice(0, 180)
     languageRef.current = language
+    hostsRef.current = hosts
+    productRef.current = product === 'writia' ? 'Writia' : 'Speakia'
+    learnerContextRef.current = learnerContext
     podcastIdRef.current = podcastId
     setPodcastId(podcastId)
     turnIndexRef.current = -1
@@ -353,50 +388,50 @@ export function useLivePodcast(onEpisodeComplete: (podcastId: string, audio: Blo
       audioContextRef.current = context
       await context.resume()
       const client = new GoogleGenAI({ apiKey: apiKey.trim() })
-      const connectHost = (speaker: PodcastTurn['speaker'], voiceName: string) => client.live.connect({
-        model: 'gemini-3.8-live',
+      const connectHost = (hostSlot: LivePodcastHostSlot, host: PodcastHost, cohost: PodcastHost, voiceName: string) => client.live.connect({
+        model: getProdiaLiveModel(),
         config: {
           responseModalities: [Modality.AUDIO],
           outputAudioTranscription: {},
-          systemInstruction: liveHostInstructions(speaker, languageRef.current, topicRef.current),
+          systemInstruction: liveHostInstructions(host, cohost, languageRef.current, topicRef.current, productRef.current, learnerContextRef.current),
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } },
         },
         callbacks: {
-          onmessage: (message) => handleMessage(speaker, message),
+          onmessage: (message) => handleMessage(hostSlot, message),
           onerror: (event) => {
-            console.error(`Gemini Live ${speaker} podcast session failed.`, event)
-            setError(`The live ${speaker} host encountered an error. Check your API key, model access, and network.`)
+            console.error(`${productRef.current} AI Live ${host.name} podcast session failed.`, event)
+            setError(`The live ${host.name} host encountered an error. Check your API key, model access, and network.`)
             void finishRef.current(false)
           },
           onclose: () => {
             if (activeRef.current) {
-              setError(`The live ${speaker} podcast connection closed unexpectedly.`)
+              setError(`The live ${host.name} podcast connection closed unexpectedly.`)
               void finishRef.current(false)
             }
           },
         },
       })
-      const aishaPromise = connectHost('Aisha', 'Kore').then((session) => {
-        if (activeRef.current) sessionsRef.current.Aisha = session
+      const host1Promise = connectHost('host1', hosts[0], hosts[1], hosts[0].gender === 'female' ? 'Kore' : 'Puck').then((session) => {
+        if (activeRef.current) sessionsRef.current.host1 = session
         else session.close()
         return session
       })
-      const noahPromise = connectHost('Noah', 'Puck').then((session) => {
-        if (activeRef.current) sessionsRef.current.Noah = session
+      const host2Promise = connectHost('host2', hosts[1], hosts[0], hosts[1].gender === 'female' ? 'Aoede' : 'Charon').then((session) => {
+        if (activeRef.current) sessionsRef.current.host2 = session
         else session.close()
         return session
       })
-      const [aisha, noah] = await Promise.all([aishaPromise, noahPromise])
+      const [host1, host2] = await Promise.all([host1Promise, host2Promise])
       if (!activeRef.current) {
-        aisha.close()
-        noah.close()
+        host1.close()
+        host2.close()
         return
       }
       nextAudioTimeRef.current = context.currentTime
       setCurrentState('live')
       sendTurn(0)
     } catch (caughtError) {
-      console.error('Unable to start the live Speakia podcast.', caughtError)
+      console.error(`Unable to start the live ${productRef.current} podcast.`, caughtError)
       setError(caughtError instanceof Error ? caughtError.message : 'The live podcast could not be started.')
       await finishRef.current(false)
     }
