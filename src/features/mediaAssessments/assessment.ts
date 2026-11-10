@@ -1,5 +1,6 @@
 import { GoogleGenAI } from '@/lib/geminiClient'
 import type { CriterionId, SentenceFeedback } from '@/features/simulator/types'
+import { IELTS_SPEAKING_CALIBRATION } from '@/features/simulator/speakingRubric'
 
 export type MediaAssessmentModel =
   | 'gemini-3.8-flash'
@@ -204,6 +205,7 @@ function promptFor(source: MediaAssessmentSource): string {
   return [
     `Assess the candidate's IELTS Speaking performance in this ${source === 'audio' ? 'audio recording' : 'YouTube video'}.`,
     'Assess only spoken candidate responses using the four public IELTS Speaking criteria: Fluency & Coherence, Lexical Resource, Grammatical Range & Accuracy, and Pronunciation.',
+    IELTS_SPEAKING_CALIBRATION,
     'If there is an interviewer, distinguish the interviewer from the candidate and score only the candidate. For video, use visuals only as context to distinguish speakers; never score appearance, identity, or visual presentation.',
     'Give a whole or half IELTS band from 0 to 9 for each criterion. The overall band must be the arithmetic mean rounded to the nearest half band.',
     'For each criterion, cite specific audible evidence and provide one actionable improvement. Do not invent speech or claim certainty when the audio is unclear.',
