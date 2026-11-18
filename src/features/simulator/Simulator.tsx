@@ -211,10 +211,14 @@ export function Simulator({ onComplete, apiKey, assessmentModel, onAssessmentMod
     tools: [{ functionDeclarations: [markTestCompleteTool] }],
     onToolCall: handleLiveToolCall,
     openingPrompt: assignment
-      ? `Begin the assigned IELTS Speaking ${assignment.part.replace('part', 'Part ')} practice on "${assignment.topic}". Introduce yourself exactly as Speakia: "Hello, my name is Speakia, and I’ll be your IELTS Speaking examiner today." Then guide the learner through the activity: ${assignment.activity}`
+      ? assignment.part === 'part1'
+        ? `Begin the Part 1 interview for the speaking practice on "${assignment.topic}". Follow the Part 1 opening and identity-check protocol in your instructions before asking a familiar-topic question. Keep the interview focused on the assigned activity: ${assignment.activity}`
+        : `Begin the assigned IELTS Speaking ${assignment.part.replace('part', 'Part ')} practice on "${assignment.topic}". Follow the selected-part instructions and guide the learner through the activity: ${assignment.activity}`
       : selectedPart === 'part2' && cueCard
-        ? `Begin an IELTS Speaking Part 2 long turn. Introduce yourself exactly as Speakia: "Hello, my name is Speakia, and I’ll be your IELTS Speaking examiner today." The candidate has already read this cue card and used or chosen to end their preparation time:\n${cueCard.question}\nInvite them to begin speaking for up to two minutes about "${cueCard.topic}". Do not read the cue card again or give another preparation minute. After the long turn, ask one brief related follow-up question.`
-      : 'Begin the IELTS Speaking practice by introducing yourself exactly as Speakia: "Hello, my name is Speakia, and I’ll be your IELTS Speaking examiner today." Then continue with the first question for the selected test format.',
+        ? `Begin the IELTS Speaking Part 2 long turn. The candidate has already read this cue card and used or chosen to end their preparation time:\n${cueCard.question}\nInvite the candidate to speak for up to two minutes about "${cueCard.topic}". Do not read the cue card again or give another preparation minute. After the long turn, ask one brief related follow-up question.`
+        : selectedPart === 'part1' || selectedPart === 'full'
+          ? 'Begin the IELTS Speaking interview. Follow the formal Part 1 opening and identity-check exchange in your instructions, one question at a time. Only after that exchange, move to the first familiar-topic question. In a full test, continue through Parts 2 and 3 in order.'
+          : 'Begin the IELTS Speaking practice for the selected part. Follow its instructions and start with the first relevant question.',
   })
   const startLiveSession = live.start
   const visibleTranscript = live.transcript.slice(-30)
@@ -296,7 +300,7 @@ export function Simulator({ onComplete, apiKey, assessmentModel, onAssessmentMod
           systemInstruction: `${createExaminerInstructions('full', prompts.map((prompt) => (
             prompt.part === 'part2' ? fullTestCueCard.cueCard : prompt.question
           )))}\nUse this exact Topic Bank cue card for Part 2:\nTitle: ${fullTestCueCard.title}\n${fullTestCueCard.cueCard}`,
-          openingPrompt: `Begin the full IELTS Speaking test. Introduce yourself using the required wording, then conduct Part 1 first. Later, present this exact Part 2 cue card and give the candidate one minute to prepare: "${fullTestCueCard.title}".`,
+          openingPrompt: `Begin the full IELTS Speaking test. Complete the Part 1 greeting and identity-check exchange described in your instructions before asking any familiar-topic questions. Then conduct Part 1, followed by this exact Part 2 cue card and one minute of preparation: "${fullTestCueCard.title}". Continue to Part 3 afterward.`,
         }
         : undefined
       const started = await startLiveSession(startOverrides)

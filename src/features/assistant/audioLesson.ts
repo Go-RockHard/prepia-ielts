@@ -96,13 +96,20 @@ export async function createAudioLesson(
   model: string,
   language: string,
   abortSignal?: AbortSignal,
-  lessonType: 'speaking' | 'writing' = 'speaking',
+  lessonType: 'speaking' | 'writing' | 'reading' | 'listening' = 'speaking',
 ): Promise<{ lesson: AudioLesson; audio: Blob }> {
   if (!apiKey.trim()) throw new Error('Add your Speakia AI API key in Settings to create an audio lesson.')
   if (!isRecord(rawArgs)) throw new Error('The audio lesson request was incomplete. Please try again.')
   const request = typeof rawArgs.request === 'string' ? rawArgs.request.trim().slice(0, 800) : ''
   if (request.length < 3) throw new Error('Tell Speakia what you want to learn in the audio lesson.')
-  const skillName = lessonType === 'writing' ? 'Writing' : 'Speaking'
+  const skillName = lessonType === 'writing' ? 'Writing' : lessonType === 'reading' ? 'Reading' : lessonType === 'listening' ? 'Listening' : 'Speaking'
+  const focusInstructions = lessonType === 'writing'
+    ? 'Focus on task analysis, idea development, paragraph organization, cohesion, precise vocabulary, grammar editing, or a writing strategy. Give short examples that a learner can apply to their own writing; do not write a full essay.'
+    : lessonType === 'reading'
+      ? 'Teach one practical Reading skill such as skimming, scanning, inference, reference, paraphrase recognition, matching headings, locating evidence, or avoiding distractors. Use the supplied passage and questions when available.'
+      : lessonType === 'listening'
+        ? 'Teach one practical Listening skill such as prediction, signposting, speaker intent, paraphrase recognition, distractors, spelling, or detail capture. Ground examples in the supplied transcript when available; do not pretend to hear unavailable audio.'
+        : 'Use realistic spoken examples and a short listen-and-repeat or speaking prompt.'
   const topic = typeof rawArgs.topic === 'string' && rawArgs.topic.trim() ? rawArgs.topic.trim().slice(0, 120) : `IELTS ${skillName}`
   const focus = typeof rawArgs.focus === 'string' && rawArgs.focus.trim() ? rawArgs.focus.trim().slice(0, 160) : `${skillName.toLocaleLowerCase()} test preparation`
   const part = rawArgs.part === 'part1' || rawArgs.part === 'part2' || rawArgs.part === 'part3' ? rawArgs.part : 'choose the most relevant part'
@@ -125,7 +132,7 @@ export async function createAudioLesson(
     config: {
       responseMimeType: 'application/json',
       abortSignal,
-      systemInstruction: `Write a concise, natural spoken IELTS ${skillName} audio lesson in ${language}. ${languageVariantInstruction} Teach one clear skill with an opening, accurate explanation, realistic examples, a short retrieval or practice prompt, and a brief takeaway. ${lessonType === 'writing' ? 'Focus on task analysis, idea development, paragraph organization, cohesion, precise vocabulary, grammar editing, or a writing strategy. Give short examples that a learner can apply to their own writing; do not write a full essay.' : 'Use realistic spoken examples and a short listen-and-repeat or speaking prompt.'} Keep it friendly, useful, and self-contained; avoid stage directions, markdown, scoring guarantees, and references to audio production. Target 250–450 spoken words. Return only JSON: {"title": string, "summary": string, "transcript": string}.`,
+      systemInstruction: `Write a concise, natural spoken IELTS ${skillName} audio lesson in ${language}. ${languageVariantInstruction} Teach one clear skill with an opening, accurate explanation, realistic examples, a short retrieval or practice prompt, and a brief takeaway. ${focusInstructions} Keep it friendly, useful, and self-contained; avoid stage directions, markdown, scoring guarantees, and references to audio production. Target 250–450 spoken words. Return only JSON: {"title": string, "summary": string, "transcript": string}.`,
     },
   })
   const scriptText = scriptResponse.text?.trim()

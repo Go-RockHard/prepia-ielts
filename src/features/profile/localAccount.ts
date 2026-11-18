@@ -1,5 +1,11 @@
 import { isPlacementAssessment, type PlacementAssessment } from '@/features/placement/types'
 
+export interface LiteracyPlacementBaseline {
+  score: number
+  total: number
+  completedAt: string
+}
+
 const DATABASE_NAME = 'speakia-user-database'
 const DATABASE_VERSION = 1
 const ACCOUNT_STORE = 'accounts'
@@ -22,8 +28,16 @@ export interface UserProfile {
   studyGoal: string
   speakingStudyGoal: string
   writingStudyGoal: string
+  readingTestDate?: string
+  readingTargetBand?: string
+  readingStudyGoal?: string
+  listeningTestDate?: string
+  listeningTargetBand?: string
+  listeningStudyGoal?: string
   speakingPlacementAssessment?: PlacementAssessment
   writingPlacementAssessment?: PlacementAssessment
+  readingPlacementBaseline?: LiteracyPlacementBaseline
+  listeningPlacementBaseline?: LiteracyPlacementBaseline
 }
 
 interface LocalAccount {
@@ -132,6 +146,12 @@ export async function createLocalAccount(usernameInput: string, password: string
     studyGoal: '',
     speakingStudyGoal: '',
     writingStudyGoal: '',
+    readingTestDate: '',
+    readingTargetBand: '',
+    readingStudyGoal: '',
+    listeningTestDate: '',
+    listeningTargetBand: '',
+    listeningStudyGoal: '',
   }
   const database = await openUserDatabase()
   try {
@@ -189,6 +209,12 @@ export async function loadUserProfile(username: string): Promise<UserProfile | n
           targetBand: speakingTargetBand,
           speakingTargetBand,
           writingTargetBand: stored.writingTargetBand ?? '',
+          readingTestDate: stored.readingTestDate ?? '',
+          readingTargetBand: stored.readingTargetBand ?? '',
+          readingStudyGoal: stored.readingStudyGoal ?? '',
+          listeningTestDate: stored.listeningTestDate ?? '',
+          listeningTargetBand: stored.listeningTargetBand ?? '',
+          listeningStudyGoal: stored.listeningStudyGoal ?? '',
           testType: stored.testType === 'General Training' ? 'General Training' : 'Academic',
           location: stored.location ?? '',
           firstLanguage: stored.firstLanguage ?? '',
@@ -197,6 +223,8 @@ export async function loadUserProfile(username: string): Promise<UserProfile | n
           writingStudyGoal: stored.writingStudyGoal ?? '',
           speakingPlacementAssessment: isPlacementAssessment(stored.speakingPlacementAssessment) && stored.speakingPlacementAssessment.skill === 'speaking' ? stored.speakingPlacementAssessment : undefined,
           writingPlacementAssessment: isPlacementAssessment(stored.writingPlacementAssessment) && stored.writingPlacementAssessment.skill === 'writing' ? stored.writingPlacementAssessment : undefined,
+          readingPlacementBaseline: isLiteracyPlacementBaseline(stored.readingPlacementBaseline) ? stored.readingPlacementBaseline : undefined,
+          listeningPlacementBaseline: isLiteracyPlacementBaseline(stored.listeningPlacementBaseline) ? stored.listeningPlacementBaseline : undefined,
         })
       }
       request.onerror = () => reject(request.error ?? new Error('Unable to load the local profile.'))
@@ -204,6 +232,18 @@ export async function loadUserProfile(username: string): Promise<UserProfile | n
   } finally {
     database.close()
   }
+}
+
+function isLiteracyPlacementBaseline(value: unknown): value is LiteracyPlacementBaseline {
+  if (typeof value !== 'object' || value === null) return false
+  const baseline = value as Partial<LiteracyPlacementBaseline>
+  return Number.isInteger(baseline.score)
+    && Number.isInteger(baseline.total)
+    && Number(baseline.score) >= 0
+    && Number(baseline.total) > 0
+    && Number(baseline.score) <= Number(baseline.total)
+    && typeof baseline.completedAt === 'string'
+    && Number.isFinite(Date.parse(baseline.completedAt))
 }
 
 export async function saveUserProfile(profile: UserProfile): Promise<void> {
@@ -247,7 +287,7 @@ export function readRememberedUsername(): string {
   try {
     return localStorage.getItem(REMEMBERED_USERNAME_KEY) ?? ''
   } catch (error) {
-    console.error('Unable to read the remembered Prodia username.', error)
+    console.error('Unable to read the remembered Prepia username.', error)
     return ''
   }
 }

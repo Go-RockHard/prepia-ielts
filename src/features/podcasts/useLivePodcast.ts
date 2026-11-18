@@ -69,7 +69,10 @@ function liveHostInstructions(host: PodcastHost, cohost: PodcastHost, language: 
     ? 'Open the episode immediately with a lively welcome, introduce the topic, and share a useful first perspective.'
     : ''
   const genderContext = host.gender === 'female' ? 'Use a natural feminine voice.' : 'Use a natural masculine voice.'
-  const skill = brand === 'Writia' ? 'IELTS Writing' : 'IELTS Speaking'
+  const skill = brand === 'Writia' ? 'IELTS Writing'
+    : brand === 'Readia' ? 'IELTS Reading'
+      : brand === 'Listenia' ? 'IELTS Listening'
+        : 'IELTS Speaking'
   return `${persona} ${role} ${genderContext}\nThis is a live, unscripted podcast conversation between two independent AI hosts, ${host.name} and ${cohost.name}, for an ${skill} learner. Focus the episode on: "${topic}". ${languageInstruction} When writing Urdu, use Urdu Perso-Arabic script; when writing Punjabi, use Shahmukhi script. Learner goals and recent skill-specific evidence (JSON): ${learnerContext || '(No recent assessment context supplied.)'}\nSpeak only your own podcast turn, about 2–4 natural sentences. Do not say speaker labels, stage directions, or mention that you are an AI. Never claim learner results or personal activity you have not been given. Alternate naturally: respond to the previous host's actual point, add a distinct useful idea, and hand the conversation back to ${cohost.name} with a relevant question or invitation. Keep the episode engaging, coherent, and useful.`
 }
 
@@ -348,7 +351,8 @@ export function useLivePodcast(onEpisodeComplete: (podcastId: string, audio: Blo
   async function start(topic: string, language: PodcastLanguage, podcastId: string, apiKey: string, hosts: [PodcastHost, PodcastHost], product: PodcastProduct = 'speakia', learnerContext = '', totalTurns = DEFAULT_PODCAST_TURN_COUNT): Promise<void> {
     if (stateRef.current !== 'idle' || activeRef.current) return
     if (!apiKey.trim()) {
-      setError(`Add your shared AI key in Settings before starting a live ${product === 'writia' ? 'Writia' : 'Speakia'} podcast.`)
+      const productName = product === 'writia' ? 'Writia' : product === 'readia' ? 'Readia' : product === 'listenia' ? 'Listenia' : 'Speakia'
+      setError(`Add your shared AI key in Settings before starting a live ${productName} podcast.`)
       return
     }
     if (topic.trim().length < 3) {
@@ -367,7 +371,7 @@ export function useLivePodcast(onEpisodeComplete: (podcastId: string, audio: Blo
     topicRef.current = topic.trim().slice(0, 180)
     languageRef.current = language
     hostsRef.current = hosts
-    productRef.current = product === 'writia' ? 'Writia' : 'Speakia'
+    productRef.current = product === 'writia' ? 'Writia' : product === 'readia' ? 'Readia' : product === 'listenia' ? 'Listenia' : 'Speakia'
     learnerContextRef.current = learnerContext
     podcastIdRef.current = podcastId
     setPodcastId(podcastId)

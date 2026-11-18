@@ -54,7 +54,9 @@ The interface should make the next meaningful action understandable while leavin
 
 ## How the modules fit together
 
-- **Practice and Speaking Drills** provide realistic IELTS prompts, live examiner interaction, focused skill exercises, and opportunities to repeat an attempt.
+- **Speakia and Speaking Drills** provide realistic IELTS prompts, live examiner interaction, focused skill exercises, and opportunities to repeat an attempt.
+- **Readia** and **Listenia** are separate receptive-skill workspaces, with independent module entry points, navigation, skill-specific libraries, and saved history. Each offers short strategy exercises plus a timed 40-question simulation (60 minutes for Reading; 30 minutes for Listening). They share lower-level question-rendering and assessment infrastructure for multiple choice and selection, True/False/Not Given, matching, completion, short answers, and diagram or plan labeling. Each offers live AI-guided strategy practice; prototype listening content uses browser-generated speech rather than official recordings.
+- **Writia** supports guided, exam-style, and independent writing practice.
 - **AI-to-AI Simulation** lets learners listen to two AI speakers demonstrate an IELTS exchange or test format before trying it themselves.
 - **Answer Builder** connects the Topic Bank to model responses, answer structures, and useful vocabulary. Its Part 1, Part 2, Part 3, and full-test prompts stay in sync with Vocabulary Studio, including custom prompts; learners can listen to AI-to-AI simulations, practise live with a candidate-to-AI examiner, review session types in the archive, and track formative answer-building mastery by question without memorising scripts.
 - **Speakia Coach and Writia** offer conversational support, guided response development, and learning activities that help learners shape and rehearse their ideas.
@@ -64,7 +66,7 @@ The interface should make the next meaningful action understandable while leavin
 - **Performance History** brings together saved sessions, transcripts, audio, and reports so a learner can reflect on change across attempts.
 - **Speakia Podcasts** provide listening material and conversational examples that can feed into further discussion and practice.
 
-Together, these modules form a loop rather than a set of isolated tools: examples and prompts lead to speaking; speaking creates evidence and useful language; reflection informs review; and review prepares the learner for another attempt.
+Together, these workspaces form a loop rather than a set of isolated tools: examples and prompts lead to skill practice; practice creates evidence and useful language; reflection informs review; and review prepares the learner for another attempt.
 
 ## Product boundaries and trust
 

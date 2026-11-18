@@ -3,7 +3,8 @@ import type { CoachAssignment } from '@/features/assignments/types'
 import type { LexicalEntry } from '@/features/vault/lexicalEntries'
 import type { UserProfile } from '@/features/profile/localAccount'
 import type { TestResult } from '@/features/simulator/types'
-import { DEFAULT_PODCAST_TURN_COUNT, PODCAST_TURN_COUNTS, type PodcastHost, type PodcastLanguage, type PodcastScriptModel, type PodcastTtsModel, type PodcastTurn, type PodcastWritingAssessment, type SpeakiaPodcast } from './types'
+import type { SkillAttempt } from '@/features/skills/literacyStorage'
+import { DEFAULT_PODCAST_TURN_COUNT, PODCAST_TURN_COUNTS, type PodcastHost, type PodcastLanguage, type PodcastProduct, type PodcastScriptModel, type PodcastTtsModel, type PodcastTurn, type PodcastWritingAssessment, type SpeakiaPodcast } from './types'
 
 interface PodcastGenerationContext {
   profile: UserProfile
@@ -249,6 +250,97 @@ export async function generateWritiaPodcast(
     return { speaker: expectedSpeaker, text }
   })
   const audio = await synthesizePodcastAudio(apiKey, turns, speechModel, streaming, hosts, language, 'Writia')
+  const actualDuration = await getWavDuration(audio)
+  return {
+    audio,
+    id: crypto.randomUUID(),
+    title: generated.title.trim().slice(0, 120),
+    topic: normalizedTopic,
+    createdAt: new Date().toISOString(),
+    durationSeconds: actualDuration ?? estimateDuration(turns),
+    summary: generated.summary.trim().slice(0, 500),
+    turns,
+    hosts,
+    scriptModel,
+    speechModel,
+    language,
+    streaming,
+    playbackMode: 'recorded',
+  }
+}
+
+export async function generateLiteracyPodcast(
+  apiKey: string,
+  topic: string,
+  product: Extract<PodcastProduct, 'readia' | 'listenia'>,
+  context: { profile: UserProfile; attempts: SkillAttempt[] },
+  scriptModel: PodcastScriptModel,
+  speechModel: PodcastTtsModel,
+  language: PodcastLanguage,
+  streaming: boolean,
+  hosts: [PodcastHost, PodcastHost],
+  turnCount = DEFAULT_PODCAST_TURN_COUNT,
+): Promise<SpeakiaPodcast & { audio: Blob }> {
+  const label = product === 'readia' ? 'Reading' : 'Listening'
+  if (!PODCAST_TURN_COUNTS.some((count) => count === turnCount)) throw new Error('Choose a supported number of podcast turns.')
+  if (!apiKey.trim()) throw new Error(`Add your shared AI key in Settings to create a ${label} podcast.`)
+  const normalizedTopic = topic.trim().slice(0, 180)
+  if (normalizedTopic.length < 3) throw new Error(`Choose what you would like ${hosts[0].name} and ${hosts[1].name} to discuss.`)
+  const client = new GoogleGenAI({ apiKey: apiKey.trim() })
+  const recentAttempts = context.attempts.slice(0, 8).map((attempt) => ({
+    title: attempt.title,
+    score: attempt.score,
+    total: attempt.total,
+    questionTypeScores: attempt.questionTypeScores,
+    mode: attempt.mode,
+  }))
+  const response = await client.models.generateContent({
+    model: scriptModel,
+    contents: [{
+      role: 'user',
+      parts: [{ text: JSON.stringify({
+        requestedFocus: normalizedTopic,
+        requestedTurnCount: turnCount,
+        podcastLanguage: language,
+        learner: {
+          name: context.profile.displayName || context.profile.username,
+          targetBand: product === 'readia' ? context.profile.readingTargetBand || null : context.profile.listeningTargetBand || null,
+          testDate: product === 'readia' ? context.profile.readingTestDate || null : context.profile.listeningTestDate || null,
+          studyGoal: product === 'readia' ? context.profile.readingStudyGoal || null : context.profile.listeningStudyGoal || null,
+          testType: context.profile.testType,
+        },
+        recentPracticeEvidence: recentAttempts,
+      }) }],
+    }],
+    config: {
+      responseMimeType: 'application/json',
+      systemInstruction: `Create a useful, warm, two-host IELTS ${label} learning podcast for ${product === 'readia' ? 'Readia' : 'Listenia'}. Focus on "${normalizedTopic}". Generate exactly ${turnCount} alternating turns, starting with ${hosts[0].name}, using ${hosts[0].name} and ${hosts[1].name}. Personalize only to the supplied learner profile and practice evidence; never invent scores or learner activity. If no practice evidence exists, say the episode is general strategy guidance rather than a diagnosis. Give concrete, skill-specific strategies and an achievable next practice action. For Reading, focus on locating textual evidence, paraphrase, inference, and question-specific strategies. For Listening, focus on prediction, signposting, distractors, memory, and answer recording. Do not claim practice accuracy is an IELTS band. Keep turns natural, concise, and conversational. Follow the selected language. Return valid JSON only: {"title":string,"summary":string,"turns":[{"speaker":"${hosts[0].name}"|"${hosts[1].name}","text":string},...]}.`,
+    },
+  })
+  const generatedText = response.text?.trim()
+  if (!generatedText) throw new Error(`${label} podcast script generation returned an empty response.`)
+  let generated: unknown
+  try {
+    generated = JSON.parse(generatedText)
+  } catch (error) {
+    console.error(`${label} podcast script returned invalid JSON.`, error)
+    throw new Error(`${label} podcast script could not be read. Please try again.`)
+  }
+  if (!isRecord(generated) || typeof generated.title !== 'string' || !generated.title.trim()
+    || typeof generated.summary !== 'string' || !generated.summary.trim()
+    || !Array.isArray(generated.turns) || generated.turns.length !== turnCount) {
+    throw new Error(`${label} podcast script is incomplete. Please try again.`)
+  }
+  const turns: PodcastTurn[] = generated.turns.map((turn, index) => {
+    const speaker = index % 2 === 0 ? hosts[0].name : hosts[1].name
+    if (!isRecord(turn) || turn.speaker !== speaker || typeof turn.text !== 'string' || !turn.text.trim()) {
+      throw new Error(`${label} podcast dialogue is invalid. Please try again.`)
+    }
+    const text = turn.text.trim()
+    if (text.length > 1200) throw new Error(`A ${label} podcast segment was too long. Please try again.`)
+    return { speaker, text }
+  })
+  const audio = await synthesizePodcastAudio(apiKey, turns, speechModel, streaming, hosts, language, product === 'readia' ? 'Readia' : 'Listenia')
   const actualDuration = await getWavDuration(audio)
   return {
     audio,

@@ -9,7 +9,7 @@ const prompts = [
     entries: [
       {
         title: 'Coach text chat · shared text and live base instructions',
-        model: 'Selected Prodia text model; Speakia Live uses its compatible live model',
+        model: 'Selected Prepia text model; Speakia Live uses its compatible live model',
         source: 'features/assistant/SpeakiaAssistant.tsx · createSystemInstruction(context)',
         text: `You are Speakia Coach, a friendly, practical IELTS Speaking preparation assistant inside the Speakia app.
 Help with IELTS Speaking test format, Parts 1–3, preparation strategies, answer structure, fluency, vocabulary, grammar, pronunciation practice, and Speakia product questions.
@@ -26,7 +26,7 @@ Current learner and saved app data (JSON):
       },
       {
         title: 'Coach live session · contextual additions',
-        model: 'Prodia Live',
+        model: 'Prepia Live',
         source: 'features/assistant/SpeakiaAssistant.tsx · liveInstruction',
         text: `The live request reuses the full Coach text-chat instructions above, then appends the applicable instructions below.
 
@@ -50,7 +50,7 @@ Continue the learner's existing Speakia coach conversation when useful. Recent c
       },
       {
         title: 'Coach live session · opening utterances',
-        model: 'Prodia Live',
+        model: 'Prepia Live',
         source: 'features/assistant/SpeakiaAssistant.tsx · openingPrompt',
         text: `The following text is sent to start a live session. The app selects the applicable instruction:
 
@@ -68,7 +68,7 @@ Speech shadowing: Begin an IELTS Speaking shadowing exercise. Briefly explain th
       },
       {
         title: 'Coach text chat · function-calling instructions',
-        model: 'Selected Prodia assistant model; Prodia tool fallback when required',
+        model: 'Selected Prepia assistant model; Prepia tool fallback when required',
         source: 'features/assistant/SpeakiaAssistant.tsx · function declarations',
         text: `The chat request also supplies the following function declarations, descriptions, and schemas:
 - navigate_speakia_page: open a page in the candidate’s Speakia IELTS workspace when they ask to go, open, show, or navigate to a page. Choose Speaking Drills to browse repeatable fluency, pronunciation, vocabulary, grammar, response-speed, and topic exercises; choose Practice for the Exam Simulation and Guided Practice tabs. Choose Speakia Coach Assets to browse generated interactive lessons, flashcards, slide decks, and quizzes. Choose Vocabulary Studio for the combined Topic Bank and Vocabulary Bank page, or choose Topic Bank or Vocabulary Bank to open its specific tab.
@@ -84,7 +84,7 @@ Speech shadowing: Begin an IELTS Speaking shadowing exercise. Briefly explain th
       },
       {
         title: 'Pakistani Urdu-English translation',
-        model: 'Selected Prodia assistant model',
+        model: 'Selected Prepia assistant model',
         source: 'features/assistant/SpeakiaAssistant.tsx · translateSentence',
         text: `System instruction: You are a precise Pakistani Urdu-English translation coach for IELTS Speaking. Interpret and generate Pakistani Urdu using familiar Pakistani vocabulary and idiom in Urdu Perso-Arabic script, not Hindi or Devanagari. Keep translations natural, accurate, supportive, and concise.
 
@@ -110,7 +110,7 @@ Return the polished English sentence first, then one short note about a useful v
     entries: [
       {
         title: 'Interactive IELTS lesson',
-        model: 'Selected Prodia learning-tool model (or fallback model)',
+        model: 'Selected Prepia learning-tool model (or fallback model)',
         source: 'features/assistant/interactiveLesson.ts · createInteractiveLesson',
         text: `Create a complete, polished, adaptive and immediately usable HTML5 lesson for IELTS Speaking. Return ONLY the complete HTML document (doctype, html, head, body). The host will render this document in a sandboxed iframe with scripts enabled but no network access, same-origin access, forms, popups, or top navigation. Therefore use only inline CSS and inline JavaScript: no external scripts, stylesheets, libraries, fonts, fetch, or network calls.
 
@@ -120,7 +120,7 @@ User content includes learnerContext, lessonRequest, topic, targetFocus, speakin
       },
       {
         title: 'Flashcards',
-        model: 'Selected Prodia learning-tool model (or fallback model)',
+        model: 'Selected Prepia learning-tool model (or fallback model)',
         source: 'features/assistant/learningModules.ts · createLearningModule',
         text: `Design a personalized IELTS Speaking flashcard set. Include accurate, useful content with active recall, realistic examples and speaking prompts. Adapt to the supplied learner and request. Return only JSON with title (string), summary (string), items (4–16 objects). Each item has title (term/question), body (meaning/model answer/key explanation), and optional example (string), prompt (string), answer (string).
 
@@ -128,7 +128,7 @@ User content includes learnerContext, request, topic, focus, level, and kind.`,
       },
       {
         title: 'Slide deck',
-        model: 'Selected Prodia learning-tool model (or fallback model)',
+        model: 'Selected Prepia learning-tool model (or fallback model)',
         source: 'features/assistant/learningModules.ts · createLearningModule',
         text: `Design a personalized visual mini slide deck for IELTS Speaking. Teach progressively with concise, accurate content, worked examples, and learner practice. Adapt to the supplied learner and request. Return only JSON with title (string), summary (string), items (4–12 objects). Each item has title (string), body (string), and optional example (string), prompt (string), answer (string, a useful coach note).
 
@@ -136,7 +136,7 @@ User content includes learnerContext, request, topic, focus, level, and kind.`,
       },
       {
         title: 'Adaptive interactive quiz',
-        model: 'Selected Prodia learning-tool model (or fallback model)',
+        model: 'Selected Prepia learning-tool model (or fallback model)',
         source: 'features/assistant/adaptiveQuiz.ts · createAdaptiveQuiz',
         text: `Create an accurate, adaptive interactive quiz that checks IELTS Speaking test knowledge and practical skills, such as test format, fluency, coherence, vocabulary, grammar, pronunciation, and natural language use. Return only JSON with a concise title and questions. Each question type must be exactly one of mcq, true_false, fill_blank, dropdown. MCQ and dropdown questions need 3–5 plausible options with exactly one correct option; true_false options must be exactly ["True","False"]; fill_blank must omit options and have a concise accepted answer. Include a short explanation teaching why the answer is correct. Adapt difficulty and focus to the supplied learner context and request. If exactQuestionCountsByType is supplied, match each count exactly, including zero-count types; return precisely requestedTotal questions when it is numeric.
 
@@ -149,7 +149,7 @@ The request data contains learnerContext, request, topic, focus, requestedTotal,
     entries: [
       {
         title: 'Live IELTS examiner',
-        model: 'Prodia Live voice model',
+        model: 'Prepia Live voice model',
         source: 'Speaking simulator · examiner instructions',
         text: `You are a realistic, professional IELTS Speaking test examiner conducting a practice test.
 Speak only as the examiner. Be warm, neutral, concise, and use clear standard English.
@@ -175,7 +175,7 @@ For an assignment, a runtime addition supplies its title, topic, focus, and acti
       },
       {
         title: 'Live speaking assessment and saved-audio reassessment',
-        model: 'Selected Prodia assessment model',
+        model: 'Selected Prepia assessment model',
         source: 'Speaking simulator · audio assessment',
         text: `Assess this {{TEST_PART}} as IELTS Speaking practice using the official four public speaking assessment criteria.
 The inline WAV is a compiled copy of the original captured examiner and candidate transcript-turn voices, in conversation order, with short pauses between turns. Evaluate only the candidate voice for the IELTS criteria.
@@ -238,13 +238,13 @@ Request data contains the requested topic, podcast language instructions, learne
       },
       {
         title: 'Podcast speech synthesis',
-        model: 'Selected Prodia voice model',
+        model: 'Selected Prepia voice model',
         source: 'features/podcasts/podcastGeneration.ts · synthesizePodcastAudio',
         text: `The TTS request sends each generated script turn as text with speech metadata. Aisha uses a warm, encouraging conversational style; Noah uses a curious, thoughtful conversational style. For Urdu, the metadata requests natural Pakistani Urdu pronunciation and rhythm, not Hindi; for Punjabi, it requests natural Pakistani Punjabi pronunciation and rhythm, not Indian Punjabi. The selected generation config maps host voices based on their selected voice gender. Output is audio; language-specific pronunciation guidance is supplied with each speaker style.`,
       },
       {
         title: 'Lexical pronunciation TTS',
-        model: 'Prodia Voice Compact',
+        model: 'Prepia Voice Compact',
         source: 'features/vault/pronunciationAudio.ts · synthesizePronunciation',
         text: `Say only this word or expression with a clear, natural English pronunciation at a measured pace: {{VOCABULARY_TERM}}
 
@@ -252,7 +252,7 @@ Audio output is requested with the Fola prebuilt voice.`,
       },
       {
         title: 'Legacy voice demo · inactive component',
-        model: 'Prodia Live and selected summary model',
+        model: 'Prepia Live and selected summary model',
         source: 'components/Sample.tsx · not mounted by the current app',
         text: `Live system instruction: You are a helpful, thoughtful general-purpose voice assistant. Help with a wide range of topics, answer clearly and accurately, ask a brief follow-up question when useful, and be transparent when you are uncertain. Keep spoken responses natural and concise unless the user asks for detail.
 
@@ -265,7 +265,7 @@ Audio-summary user prompt: Summarize this recorded conversation between a user a
     entries: [
       {
         title: 'Writia live writing coach',
-        model: 'Prodia Live',
+        model: 'Prepia Live',
         source: 'features/writia/WritiaPage.tsx · liveInstructions(question)',
         text: `You are Writia, a supportive, expert IELTS Speaking answer-writing coach. The learner is developing a spoken-style answer by typing it, not taking IELTS Writing. The current speaking prompt is:
 {{SPEAKING_PROMPT}}

@@ -25,6 +25,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { practicePromptsForPart } from './questions'
+import type { SpeakingPrompt } from '@/features/simulator/questions'
 import { createTranscriptAudioCopy } from '@/features/simulator/gemini'
 import { useGeminiLive } from '@/features/simulator/useGeminiLive'
 import type { TestPart, TestResult, TranscriptEntry } from '@/features/simulator/types'
@@ -237,7 +238,45 @@ const partOptions: { id: TestPart; label: string; help: string }[] = [
   { id: 'part3', label: 'Part 3 · Discussion', help: 'Developed opinions and broader ideas' },
 ]
 
-function makeSystemInstruction(mode: PracticeModeId, part: TestPart, question: string, skills: SkillFocus[], questionCount: number, retryAnswer: RetryAnswer | undefined, fullTestCoaching: FullTestCoaching): string {
+function normalizeQuestion(question: string): string {
+  return question.toLocaleLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim()
+}
+
+function recentPartOneQuestions(records: PracticeModeArchiveRecord[]): string[] {
+  const seen = new Set<string>()
+  const questions: string[] = []
+  for (const record of [...records]
+    .filter((item) => item.part === 'part1' || item.part === 'full')
+    .sort((left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt))
+    .slice(0, 12)) {
+    for (const turn of record.turns) {
+      if (turn.role !== 'examiner') continue
+      for (const segment of turn.text.match(/[^?]+\?/g) ?? []) {
+        const sentences = segment.split(/(?<=[.!])\s+/)
+        const question = (sentences[sentences.length - 1] ?? '').trim()
+        const normalized = normalizeQuestion(question)
+        if (question.length < 8 || !normalized || seen.has(normalized)) continue
+        seen.add(normalized)
+        questions.push(question)
+        if (questions.length >= 48) return questions
+      }
+    }
+  }
+  return questions
+}
+
+function freshPartOneOpeningQuestion(selected: SpeakingPrompt, questions: SpeakingPrompt[], previousQuestions: string[]): SpeakingPrompt {
+  const asked = new Set(previousQuestions.map(normalizeQuestion))
+  if (!asked.has(normalizeQuestion(selected.question))) return selected
+  const available = questions.filter((question) => !asked.has(normalizeQuestion(question.question)))
+  return available.length ? available[Math.floor(Math.random() * available.length)] : selected
+}
+
+function addDrillRecommendationInstructions(instruction: string): string {
+  return `${instruction}\n\nAfter at least two meaningful candidate attempts, if you observe a specific recurring speaking-skill gap, call ${drillRecommendationToolName} with concise evidence from this session and one to three matching drill IDs. Do not infer a weakness from one minor slip or make a stable diagnosis. The app will show the learner a choice of targeted drills; explain it briefly and let them decide.`
+}
+
+function makeSystemInstruction(mode: PracticeModeId, part: TestPart, question: string, skills: SkillFocus[], questionCount: number, retryAnswer: RetryAnswer | undefined, fullTestCoaching: FullTestCoaching, previousPartOneQuestions: string[] = []): string {
   const selectedSkills = skills.includes('all') ? skillOptions : skillOptions.filter((option) => skills.includes(option.id))
   const skillLabels = selectedSkills.map((option) => option.label).join(', ')
   const skillPrompt = selectedSkills.map((option) => option.prompt).join('; ')
@@ -270,7 +309,10 @@ function makeSystemInstruction(mode: PracticeModeId, part: TestPart, question: s
     'model-answer': `Run coach-led IELTS model-answer practice for ${part}. Before every examiner response, call ${modelAnswerToolName} once with a JSON question and its matching natural modelAnswer. For the first pair, use this starting question: "${question}". For each later pair, create the next relevant IELTS question for ${part}. Make Part 1 answers about 2–3 sentences, Part 2 answers a developed long turn, and Part 3 answers a concise developed response. After the tool responds, speak only the question value verbatim; never read or mention modelAnswer. Let the learner study the displayed answer and mirror it aloud. After the attempt, identify one useful language or delivery choice from the model, give one specific retry cue, and invite the learner to say it again in their own natural voice before moving on.`,
     'criterion-builder': `Run guided IELTS speaking practice that deliberately targets ${skillFocus}. Give specific, practical coaching tied to the selected criterion or criteria after each response, but keep the practice conversational and do not assign an official band score.`,
   }
-  instructions['mock-test'] = `Act as a supportive IELTS speaking coach guiding a complete Part 1, Part 2, and Part 3 practice in official order. This is not an independent exam simulation. At the start of each part, briefly explain its goal and give one useful strategy. Ask one question at a time and never interrupt a candidate answer. ${fullTestCoaching === 'answer-by-answer' ? 'After every answer, give one concise, evidence-based strength and one practical improvement cue, then let the learner continue; keep coaching brief so all three parts can be completed.' : 'After each part, give a short, evidence-based strength and one improvement cue, then explain how to apply it in the next part.'} If the learner asks for help, offer a small scaffold without supplying a memorised answer. Keep Part 2 preparation and speaking timing realistic, connect Part 3 to the cue-card topic, and end with a concise review of progress across the three parts. The starting question is the first Part 1 question.`
+  const questionMemory = previousPartOneQuestions.length
+    ? `\nRECENT PART 1 QUESTION MEMORY — do not repeat any of these questions or ask close paraphrases in this interview:\n${previousPartOneQuestions.map((item) => `- ${item}`).join('\n')}`
+    : '\nThere are no archived Part 1 interview questions to avoid yet.'
+  instructions['mock-test'] = `Conduct a realistic IELTS Speaking mock test in the familiar official order. Open Part 1 with a brief, natural greeting and a formal identity-check exchange before any familiar-topic questions. Ask for the candidate's full name, what they would like to be called, whether you may see their identification, and where they are from, one question at a time and waiting for each response. Accept a simple verbal confirmation for the identification request; never ask for an ID number, document image, or other sensitive details. These administrative questions do not count toward the Part 1 question limit. Then ask 4–6 short questions across two or three familiar topics such as home, work or study, family, interests, and everyday routines; the selected starting question is the first topic question. Ask one question at a time, listen without interruption, follow the candidate's answers naturally, and change topic once or twice. Treat the supplied question as topic guidance, not a script: phrase questions naturally and create fresh ones as needed. Keep an internal record of each question and its meaning. Never repeat a question or ask a close paraphrase later in this session, including after a topic change; check that each follow-up explores a genuinely new detail. Do not coach, correct, praise, evaluate, give hints, or comment on answers during Part 1, even when answer-by-answer coaching is selected. Avoid repeating questions or substantially similar questions listed in the recent-question memory below; when practical, also choose a different topic from the most recent interview. Keep Part 1 within 4–5 minutes and do not exceed six topic questions. Transition naturally to one Part 2 cue card with one minute to prepare and up to two minutes to speak, then related Part 3 discussion. Never interrupt a candidate answer. ${fullTestCoaching === 'answer-by-answer' ? 'After each answer in Parts 2 and 3, give one concise, evidence-based strength and one practical improvement cue.' : 'Give a short, evidence-based strength and one improvement cue between parts.'} End with a concise review of progress across the three parts. The starting question is the first Part 1 topic question, but must be replaced with a fresh question if it substantially repeats one from the recent-question memory.${questionMemory}`
   instructions['cue-card-studio'] = `Run a focused Part 2 session. Present the selected cue card, allow one minute for brief planning notes, and then invite a long turn of up to two minutes. Do not interrupt. Ask up to two natural same-topic follow-ups, then give one useful ${skillFocus} note and one next-step cue.`
   instructions['perspective-lab'] = `Run an IELTS Part 3 discussion. Ask the starting question, then no more than ${Math.min(questionCount, 6)} broader questions. Invite reasons, examples, comparisons, and a counter-view without forcing a memorised structure. Give one brief cue focused on ${skillFocus} after each answer, then one strength and next step at the end.`
   return `${base.join('\n')}\n${instructions[mode] ?? 'Conduct a short IELTS speaking practice within the selected part and question limit.'}`
@@ -421,6 +463,7 @@ export function PracticeModesPage({ apiKey, results, username, onOpenSettings, o
   const liveTipsQuestionCountRef = useRef(0)
   const liveTemplateQuestionCountRef = useRef(0)
   const challengeSecondsRef = useRef(0)
+  const previousPartOneQuestions = useMemo(() => recentPartOneQuestions(archive), [archive])
   const promptPart = part === 'full' ? 'part1' : part
   const questions = useMemo(() => practicePromptsForPart(promptPart), [promptPart])
   const selectedQuestion = questions.find((question) => question.id === questionId) ?? questions[0]
@@ -458,7 +501,7 @@ export function PracticeModesPage({ apiKey, results, username, onOpenSettings, o
   const effectiveQuestionCount = Math.min(discussionQuestionCount, part === 'part2' ? 1 : 6)
   const timeRemaining = challengeSeconds
   const sessionInstruction = selectedMode && selectedQuestion
-    ? makeSystemInstruction(selectedMode, part, practiceQuestion, selectedMode === 'criterion-builder' ? selectedCriteria : ['all'], effectiveQuestionCount, retryAnswer, fullTestCoaching)
+    ? makeSystemInstruction(selectedMode, part, practiceQuestion, selectedMode === 'criterion-builder' ? selectedCriteria : ['all'], effectiveQuestionCount, retryAnswer, fullTestCoaching, previousPartOneQuestions)
     : ''
   const handleModelAnswerToolCall = useCallback(async (functionCalls: FunctionCall[]): Promise<FunctionResponse[]> => functionCalls.map((call) => {
     if (modelAnswerQuestionCountRef.current >= questionLimit) {
@@ -598,7 +641,7 @@ export function PracticeModesPage({ apiKey, results, username, onOpenSettings, o
   }, [handleAdaptiveScaffoldToolCall, handleDrillRecommendationToolCall, handleLiveTemplateToolCall, handleLiveTipsToolCall, handleModelAnswerToolCall, selectedMode])
   const live = useGeminiLive({
     apiKey,
-    systemInstruction: `${sessionInstruction}\n\nAfter at least two meaningful candidate attempts, if you observe a specific recurring speaking-skill gap, call ${drillRecommendationToolName} with concise evidence from this session and one to three matching drill IDs. Do not infer a weakness from one minor slip or make a stable diagnosis. The app will show the learner a choice of targeted drills; explain it briefly and let them decide.`,
+    systemInstruction: addDrillRecommendationInstructions(sessionInstruction),
     openingPrompt: selectedMode === 'adaptive-scaffold'
       ? `Welcome the learner to Adaptive Coach. Explain that you will offer just enough help when needed and ask deeper follow-up questions when they are ready. Start with this exact IELTS question: "${selectedQuestion?.question ?? ''}". Do not provide support automatically if the learner can begin independently.`
       : selectedMode === 'retry-improve' && retryAnswer
@@ -610,7 +653,7 @@ export function PracticeModesPage({ apiKey, results, username, onOpenSettings, o
           : selectedMode === 'live-template'
             ? `Start Live Template practice. Call ${liveTemplateToolName} to prepare the first question "${selectedQuestion?.question ?? ''}" and a question-specific answer framework with partial sentence frames. Speak only the question aloud; the app displays the framework for the learner to build their own answer. Never provide a completed answer.`
         : selectedMode === 'mock-test'
-          ? `Begin a full guided IELTS Speaking practice. Explain that you will coach ${fullTestCoaching === 'answer-by-answer' ? 'briefly after each answer' : 'between sections'}, then start with this Part 1 question: "${selectedQuestion?.question ?? ''}". Follow the Part 1, Part 2, and Part 3 sequence in order and offer a small scaffold whenever the learner asks for help.`
+          ? `Begin a realistic IELTS Speaking mock test as a neutral, polite examiner. Give a brief natural introduction, then ask this as the first Part 1 question: "${selectedQuestion?.question ?? ''}". Wait for the candidate's answer. Do not explain coaching or give feedback during Part 1.`
         : selectedMode === 'cue-card-studio'
           ? `Welcome the learner to Cue Card Studio. Present this exact Part 2 cue card: "${selectedQuestion?.question ?? ''}". Explain that they have one minute to make notes, then invite a long turn of up to two minutes.`
         : selectedMode === 'perspective-lab'
@@ -797,7 +840,24 @@ export function PracticeModesPage({ apiKey, results, username, onOpenSettings, o
       return
     }
     try {
-      const connected = await live.start()
+      const startingQuestion = selectedMode === 'mock-test'
+        ? freshPartOneOpeningQuestion(selectedQuestion, questions, previousPartOneQuestions)
+        : selectedQuestion
+      if (startingQuestion.id !== selectedQuestion.id) setQuestionId(startingQuestion.id)
+      const overrides = selectedMode === 'mock-test' ? {
+        systemInstruction: addDrillRecommendationInstructions(makeSystemInstruction(
+          selectedMode,
+          part,
+          startingQuestion.question,
+          ['all'],
+          effectiveQuestionCount,
+          retryAnswer,
+          fullTestCoaching,
+          previousPartOneQuestions,
+        )),
+        openingPrompt: `Begin a realistic IELTS Speaking mock test as a neutral, polite examiner. Follow the formal Part 1 greeting and identity-check exchange in your instructions, one question at a time. After the identity check, ask this as the first familiar-topic question unless it substantially repeats a question in the recent-question memory; if it does, create a fresh question on a suitable familiar topic. Wait for the candidate's answer. Do not explain coaching or give feedback during Part 1.`,
+      } : undefined
+      const connected = await live.start(overrides)
       if (!connected) setError(live.error || 'The live speaking session could not connect.')
       else sessionStartedAt.current = new Date().toISOString()
     } catch (caughtError) {
@@ -919,8 +979,8 @@ export function PracticeModesPage({ apiKey, results, username, onOpenSettings, o
       </section>}
       <div className="practice-mode-config-grid">
         <label>IELTS speaking format<select value={part} disabled={availablePartOptions.length === 1} onChange={(event) => { const nextPart = event.target.value as TestPart; setPart(nextPart); setQuestionId('') }}>{availablePartOptions.map((option) => <option key={option.id} value={option.id}>{option.label} — {option.help}</option>)}</select></label>
-        <label>Starting question<select value={selectedQuestion?.id ?? ''} onChange={(event) => setQuestionId(event.target.value)}>{questions.map((question) => <option key={question.id} value={question.id}>{question.topic}: {question.question}</option>)}</select></label>
-        {selectedMode === 'mock-test' && <label>Full-test coaching style<select value={fullTestCoaching} onChange={(event) => setFullTestCoaching(event.target.value as FullTestCoaching)}><option value="part-by-part">Coach between parts · guidance and feedback at each transition</option><option value="answer-by-answer">Coach after each answer · brief feedback throughout all three parts</option></select></label>}
+        <label>Starting question<select value={selectedQuestion?.id ?? ''} onChange={(event) => setQuestionId(event.target.value)}>{questions.map((question) => <option key={question.id} value={question.id}>{question.topic}: {question.question}</option>)}</select>{selectedMode === 'mock-test' && <small>If this was asked in a recent Part 1 interview, a fresh opening question is chosen when you start.</small>}</label>
+        {selectedMode === 'mock-test' && <label>Full-test coaching style<select value={fullTestCoaching} onChange={(event) => setFullTestCoaching(event.target.value as FullTestCoaching)}><option value="part-by-part">Coach between parts · examiner-style Part 1, feedback at transitions</option><option value="answer-by-answer">Coach after answers in Parts 2 &amp; 3 · no interruptions in Part 1</option></select></label>}
         {selectedMode === 'retry-improve' && <label>Response to retry<select value={retryAnswerId} onChange={(event) => { setRetryAnswerId(event.target.value); const answer = retryAnswers.find((item) => item.id === event.target.value); if (answer) setPart(answer.part) }}>{retryAnswers.map((answer) => <option key={answer.id} value={answer.id}>{new Intl.DateTimeFormat('en', { dateStyle: 'medium' }).format(new Date(answer.completedAt))} · {answer.prompt.slice(0, 90)}</option>)}</select>{retryAnswers.length === 0 && <small>Complete a practice test first to add responses to your history.</small>}</label>}
         {selectedMode === 'perspective-lab' && <label>Discussion questions<select value={effectiveQuestionCount} onChange={(event) => setDiscussionQuestionCount(Number(event.target.value))}>{[3, 5, 6].map((count) => <option key={count} value={count}>{count} questions</option>)}</select></label>}
       </div>

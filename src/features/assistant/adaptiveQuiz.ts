@@ -159,7 +159,7 @@ interface QuizRequirements {
   expectedCounts?: Record<QuizQuestionType, number>
 }
 
-function getQuizRequirements(rawArgs: Record<string, unknown>, lessonType: 'speaking' | 'writing' = 'speaking'): QuizRequirements {
+function getQuizRequirements(rawArgs: Record<string, unknown>, lessonType: 'speaking' | 'writing' | 'reading' | 'listening' = 'speaking'): QuizRequirements {
   if (!isRecord(rawArgs)) throw new Error('The quiz request was incomplete. Please try again.')
   const request = typeof rawArgs.request === 'string' ? rawArgs.request.trim().slice(0, 1000) : ''
   if (request.length < 3) throw new Error('Tell Speakia what you want to check in your quiz.')
@@ -183,7 +183,7 @@ function getQuizRequirements(rawArgs: Record<string, unknown>, lessonType: 'spea
   }
   return {
     request,
-    topic: typeof rawArgs.topic === 'string' && rawArgs.topic.trim() ? rawArgs.topic.trim().slice(0, 120) : `IELTS ${lessonType === 'writing' ? 'Writing' : 'Speaking'}`,
+    topic: typeof rawArgs.topic === 'string' && rawArgs.topic.trim() ? rawArgs.topic.trim().slice(0, 120) : `IELTS ${lessonType === 'writing' ? 'Writing' : lessonType === 'reading' ? 'Reading' : lessonType === 'listening' ? 'Listening' : 'Speaking'}`,
     focus: typeof rawArgs.focus === 'string' && rawArgs.focus.trim() ? rawArgs.focus.trim().slice(0, 180) : request,
     count,
     ...(hasTypeCounts ? { expectedCounts: counts } : {}),
@@ -206,7 +206,7 @@ function buildAdaptiveQuiz(rawArgs: Record<string, unknown>, requirements: QuizR
   }
 }
 
-export function createAdaptiveQuizFromContent(rawArgs: Record<string, unknown>, lessonType: 'speaking' | 'writing' = 'speaking'): AdaptiveQuiz {
+export function createAdaptiveQuizFromContent(rawArgs: Record<string, unknown>, lessonType: 'speaking' | 'writing' | 'reading' | 'listening' = 'speaking'): AdaptiveQuiz {
   const requirements = getQuizRequirements(rawArgs, lessonType)
   return buildAdaptiveQuiz(rawArgs, requirements)
 }
@@ -217,10 +217,10 @@ export async function createAdaptiveQuiz(
   learnerContext: unknown,
   model: string,
   abortSignal?: AbortSignal,
-  lessonType: 'speaking' | 'writing' = 'speaking',
+  lessonType: 'speaking' | 'writing' | 'reading' | 'listening' = 'speaking',
 ): Promise<AdaptiveQuiz> {
   if (!apiKey.trim()) throw new Error('Add your Speakia AI API key in Settings to create a quiz.')
-  const skillName = lessonType === 'writing' ? 'Writing' : 'Speaking'
+  const skillName = lessonType === 'writing' ? 'Writing' : lessonType === 'reading' ? 'Reading' : lessonType === 'listening' ? 'Listening' : 'Speaking'
   const requirements = getQuizRequirements(rawArgs, lessonType)
   const client = new GoogleGenAI({ apiKey: apiKey.trim() })
   const response = await client.models.generateContent({
@@ -264,7 +264,7 @@ export async function createAdaptiveQuiz(
         required: ['title', 'questions'],
         propertyOrdering: ['title', 'questions'],
       },
-      systemInstruction: `Create an accurate, adaptive interactive quiz that checks IELTS ${skillName} knowledge and practical skills, such as ${lessonType === 'writing' ? 'task response, task achievement, coherence and cohesion, lexical resource, grammar, planning, and editing' : 'test format, fluency, coherence, vocabulary, grammar, pronunciation, and natural language use'}. Return only JSON with a concise title and questions. Each question type must be exactly one of mcq, true_false, fill_blank, dropdown. MCQ and dropdown questions need 3–5 plausible options with exactly one correct option; true_false options must be exactly ["True","False"]; fill_blank must omit options and have a concise accepted answer. Include a short explanation teaching why the answer is correct. Adapt difficulty and focus to the supplied learner context and request. If exactQuestionCountsByType is supplied, match each count exactly, including zero-count types; return precisely requestedTotal questions when it is numeric.`,
+      systemInstruction: `Create an accurate, adaptive interactive quiz that checks IELTS ${skillName} knowledge and practical skills, such as ${lessonType === 'writing' ? 'task response, task achievement, coherence and cohesion, lexical resource, grammar, planning, and editing' : lessonType === 'reading' ? 'skimming, scanning, inference, matching headings, paraphrase recognition, locating evidence, and distractor analysis' : lessonType === 'listening' ? 'prediction, signposting, speaker intent, paraphrase recognition, distractor analysis, spelling, and detail capture' : 'test format, fluency, coherence, vocabulary, grammar, pronunciation, and natural language use'}. Use the provided passage or listening transcript and question evidence when supplied; never invent source details. Return only JSON with a concise title and questions. Each question type must be exactly one of mcq, true_false, fill_blank, dropdown. MCQ and dropdown questions need 3–5 plausible options with exactly one correct option; true_false options must be exactly ["True","False"]; fill_blank must omit options and have a concise accepted answer. Include a short explanation teaching why the answer is correct. Adapt difficulty and focus to the supplied learner context and request. If exactQuestionCountsByType is supplied, match each count exactly, including zero-count types; return precisely requestedTotal questions when it is numeric.`,
     },
   })
   const text = response.text?.trim()

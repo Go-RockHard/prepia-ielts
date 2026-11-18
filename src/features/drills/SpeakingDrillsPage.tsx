@@ -17,6 +17,7 @@ import { drillRecommendationToolName, drillRecommendationTools, processDrillReco
 import { DrillRecommendations } from './DrillRecommendations'
 import { loadTranscriptAudio, saveTranscriptAudio } from '@/features/simulator/recordingStorage'
 import { createTranscriptAudioCopy } from '@/features/simulator/gemini'
+import { getProdiaLiveModel, GEMINI_LIVE_MODELS, saveProdiaLiveModel, type ProdiaLiveModel } from '@/lib/geminiModels'
 
 interface Drill {
   id: string
@@ -494,6 +495,8 @@ function SpeakingDrillWorkspace({ apiKey, username, onOpenSettings, onOpenDrill,
   onInitialDrillHandled?: () => void
 }) {
   const initialDrill = drills.find((item) => item.id === initialDrillId)
+  const [liveModel, setLiveModel] = useState<ProdiaLiveModel>(() => getProdiaLiveModel('gemini-3.8-live-extended-thinking'))
+  const [liveModelError, setLiveModelError] = useState('')
   const [selectedDrillId, setSelectedDrillId] = useState(initialDrill?.id ?? drills[0].id)
   const [activePrompt, setActivePrompt] = useState(initialPrompt?.trim() || initialDrill?.prompts[0] || drills[0].prompts[0])
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
@@ -584,8 +587,9 @@ function SpeakingDrillWorkspace({ apiKey, username, onOpenSettings, onOpenDrill,
   }, [handleAdaptiveScaffoldToolCall, handleDrillRecommendationToolCall])
   const live = useGeminiLive({
     apiKey,
+    liveModel,
     systemInstruction: `You are Speakia, a supportive IELTS Speaking drill coach. This is focused practice, not an official band assessment. Target skill: ${drill.skill}. Exercise: ${drill.task}\nToday's prompt: ${activePrompt}\n${drill.instructions}\nUse additional internal reasoning to compare the learner's performance with the target skill and select the most useful next step. Never disclose private chain-of-thought. Give only actionable feedback and concise conclusions. Let the learner know they can ask for support at any time using the Get tailored help control or by asking you directly.\n\nAdaptive coaching is available in every Speaking Drill, not only in drills about coaching. Follow the selected drill's practice instructions, listen to each attempt, and decide whether the learner would benefit from a just-in-time scaffold. If they are stuck, cannot start, give a very brief or off-task response, repeatedly hesitate, make a recurring or meaningful error they struggle to correct, or explicitly ask for help, call ${adaptiveScaffoldToolName} and show exactly one small aid through the app's shared Guided Practice support widget. Do not interrupt a learner who is actively speaking. Match the aid to both the observed attempt and target skill: use idea cues for generating content, useful vocabulary for lexical gaps, answer structure for developing or connecting ideas, sentence frames for grammar or incomplete sentences, and a short worked example for a demonstrated pattern or pronunciation model only after the learner has tried and still needs substantial support. For pronunciation, keep the model short and focus feedback on intelligibility, stress, rhythm, phrasing, or intonation that is actually audible. Respect drills specifically designed to scaffold from the start, then fade their support progressively. If the learner can proceed independently, use a brief encouraging or appropriately more challenging follow-up instead of adding unnecessary help. After showing a scaffold, invite the learner to retry in their own words, respond to the retry, and reduce support as they improve. Never present a worked example as a script to memorize.\n\nAfter at least two meaningful candidate attempts, if you observe a specific speaking-skill gap in this session, call ${drillRecommendationToolName} with concise evidence from the learner's actual attempts and one to three matching drill IDs. Do not recommend a drill for a single minor slip, guess at a weakness, or describe a short session as a stable diagnosis. The app will show an optional choice of targeted drills; explain the suggestion briefly and let the learner decide whether to open one.`,
-    thinkingLevel: ThinkingLevel.HIGH,
+    ...(liveModel === 'gemini-3.8-live-extended-thinking' ? { thinkingLevel: ThinkingLevel.HIGH } : {}),
     tools: [...adaptiveScaffoldTools, ...drillRecommendationTools],
     toolConfig: { functionCallingConfig: { mode: FunctionCallingConfigMode.AUTO, allowedFunctionNames: [adaptiveScaffoldToolName, drillRecommendationToolName] } },
     onToolCall: handleLiveToolCall,
@@ -671,6 +675,18 @@ function SpeakingDrillWorkspace({ apiKey, username, onOpenSettings, onOpenDrill,
   function requestFeedback() {
     setIsReviewing(true)
     live.sendInstruction(`Please wrap up this ${drill.title} now. Give concise, specific feedback only on ${drill.skill}: mention one observed strength, one concrete improvement grounded in what the learner said, and one short spoken retry or next practice step. Be encouraging and do not give an official IELTS band score.`)
+  }
+
+  function changeLiveModel(value: string) {
+    const selected = GEMINI_LIVE_MODELS.find((candidate) => candidate.id === value)
+    if (!selected) return
+    try {
+      saveProdiaLiveModel(selected.id)
+      setLiveModel(selected.id)
+      setLiveModelError('')
+    } catch (caughtError) {
+      setLiveModelError(caughtError instanceof Error ? caughtError.message : 'Unable to save the Prepia Live model preference.')
+    }
   }
 
   async function endDrill() {
@@ -914,6 +930,7 @@ function SpeakingDrillWorkspace({ apiKey, username, onOpenSettings, onOpenDrill,
           <div ref={drillTaskRef} id="drill-task-target"><Card className="drill-task-card">
             <div className="drill-task-heading"><div><span className="section-kicker">YOUR TASK</span><h2>{drill.title}</h2></div><Badge className="assignment-part-badge">{drill.skill}</Badge></div>
             <p>{drill.task}</p><div className="drill-active-prompt"><span>THIS ATTEMPT’S PROMPT</span><strong>{activePrompt}</strong><Button type="button" variant="outline" size="sm" onClick={chooseNewPrompt}><RotateCcw size={13} /> New prompt</Button></div>
+            <label className="drill-thinking-mode">Live thinking mode<select aria-label="Speaking Drill Live thinking mode" value={liveModel} onChange={(event) => changeLiveModel(event.target.value)}>{GEMINI_LIVE_MODELS.map((option) => <option key={option.id} value={option.id}>{option.id === 'gemini-3.8-live' ? 'Standard · Prepia Live' : 'Extended thinking · Prepia Live Reasoning'}</option>)}</select><small>{liveModel === 'gemini-3.8-live-extended-thinking' ? 'Extended reasoning for adaptive drill coaching.' : 'Standard Prepia Live responses.'}</small>{liveModelError && <small role="alert">{liveModelError}</small>}</label>
             {selectedAttempts.length > 0 && <div className="drill-selected-progress"><span><Gauge size={15} /> {drill.title} mastery</span><strong>{selectedMastery}%</strong><div className="drill-skill-meter-track"><span style={{ width: `${selectedMastery}%` }} /></div><small>{selectedAttempts.length} evaluated {selectedAttempts.length === 1 ? 'attempt' : 'attempts'}{selectedAttempts.length > 1 ? ` · ${improvement > 0 ? '+' : ''}${improvement}% since first evaluated attempt` : ''}</small></div>}
             <div className="drill-task-footer"><span><Clock3 size={15} /> About {formatTime(drill.durationSeconds)} · You can finish whenever you’re ready</span><Button className="start-button" disabled={!apiKey.trim() || live.connecting} onClick={() => void startDrill()}>{live.connecting ? <><LoaderCircle className="spin-icon" size={16} /> Connecting…</> : <><Mic size={15} /> Start this drill <ArrowRight size={15} /></>}</Button></div>
             {live.error && <p className="simulator-error" role="alert"><AlertCircle size={15} /> {live.error}</p>}
@@ -927,7 +944,7 @@ function SpeakingDrillWorkspace({ apiKey, username, onOpenSettings, onOpenDrill,
         <section className="drill-session" aria-labelledby="drill-session-heading">
           <div className="drill-session-header">
             <Button variant="outline" onClick={() => void endDrill()} disabled={live.connecting}><ArrowLeft size={15} /> End drill</Button>
-            <Badge className="drill-live-thinking"><span /> <Sparkles size={13} /> EXTENDED THINKING ACTIVE</Badge>
+            <Badge className="drill-live-thinking"><span /> <Sparkles size={13} /> {liveModel === 'gemini-3.8-live-extended-thinking' ? 'EXTENDED THINKING ACTIVE' : 'STANDARD MODE ACTIVE'}</Badge>
             <span className="drill-session-timer"><Clock3 size={15} /> {formatTime(Math.max(0, drill.durationSeconds - elapsedSeconds))}</span>
           </div>
           <Card className="drill-live-card">

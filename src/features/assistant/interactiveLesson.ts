@@ -20,7 +20,7 @@ export const interactiveLessonTool: FunctionDeclaration = {
       request: { type: Type.STRING, description: 'The lesson request or desired adaptation, based on what the learner asked.' },
       topic: { type: Type.STRING, description: 'IELTS Speaking topic, such as hometown, technology, work, or describing an experience.' },
       focus: { type: Type.STRING, description: 'Target skill, such as fluency, idea development, vocabulary, grammar, or pronunciation.' },
-      part: { type: Type.STRING, enum: ['part1', 'part2', 'part3'], description: 'Relevant IELTS Speaking part.' },
+      part: { type: Type.STRING, enum: ['part1', 'part2', 'part3', 'part4'], description: 'Relevant IELTS test part or listening section.' },
       level: { type: Type.STRING, description: 'Learner level or target band, if known.' },
     },
     required: ['request'],
@@ -65,16 +65,25 @@ export async function createInteractiveLesson(
   learnerContext: unknown,
   model: string = getProdiaTextModel(),
   abortSignal?: AbortSignal,
-  lessonType: 'speaking' | 'writing' = 'speaking',
+  lessonType: 'speaking' | 'writing' | 'reading' | 'listening' = 'speaking',
 ): Promise<InteractiveLesson> {
   if (!apiKey.trim()) throw new Error('Add your Speakia AI key in Settings to create an interactive lesson.')
   if (!isRecord(rawArgs)) throw new Error('The lesson request was incomplete. Please try again.')
   const request = boundedText(rawArgs.request, '', 800)
   if (request.length < 3) throw new Error('Tell Speakia what topic or skill you want the lesson to cover.')
-  const skillName = lessonType === 'writing' ? 'Writing' : 'Speaking'
+  const skillName = lessonType === 'writing' ? 'Writing' : lessonType === 'reading' ? 'Reading' : lessonType === 'listening' ? 'Listening' : 'Speaking'
   const topic = boundedText(rawArgs.topic, `IELTS ${skillName}`, 120)
-  const focus = boundedText(rawArgs.focus, lessonType === 'writing' ? 'task analysis and clear writing' : 'speaking fluency and clear ideas', 160)
-  const part = rawArgs.part === 'part1' || rawArgs.part === 'part2' || rawArgs.part === 'part3' ? rawArgs.part : 'choose the most relevant part'
+  const focus = boundedText(rawArgs.focus, lessonType === 'writing' ? 'task analysis and clear writing' : lessonType === 'reading' ? 'skimming, scanning, inference and evidence' : lessonType === 'listening' ? 'prediction, signposting, detail capture and distractors' : 'speaking fluency and clear ideas', 160)
+  const part = rawArgs.part === 'part1' || rawArgs.part === 'part2' || rawArgs.part === 'part3' || rawArgs.part === 'part4' ? rawArgs.part : 'choose the most relevant part'
+  const partKey = lessonType === 'writing' ? 'writingTaskPart' : lessonType === 'reading' ? 'readingPassagePart' : lessonType === 'listening' ? 'listeningSection' : 'speakingPart'
+  const skillPractice = lessonType === 'writing' ? 'Writing' : lessonType === 'reading' ? 'Reading' : lessonType === 'listening' ? 'Listening' : 'Speaking'
+  const skillDetails = lessonType === 'writing'
+    ? 'Use task-appropriate writing practice: task analysis, idea development, paragraph organization, precise vocabulary, grammar editing, guided revision, and transfer into a new writing context. Include short writing inputs with feedback rather than asking the learner to write a full essay. Never rewrite a complete response or treat an AI practice estimate as an official IELTS score.'
+    : lessonType === 'reading'
+      ? 'Use a supplied passage and question set when provided. Create short exercises on skimming, scanning, inference, reference, paraphrase, matching headings, locating evidence, and explaining distractors. Never fabricate passage evidence or expose answer keys unless the learner explicitly asks in guided practice.'
+      : lessonType === 'listening'
+        ? 'Use a supplied listening transcript and question set when provided. Create short exercises on prediction, signposting, speaker intent, paraphrase, distractors, spelling, and detail capture. Ground explanations in the transcript; never pretend to hear unavailable audio.'
+        : ''
   const level = boundedText(rawArgs.level, 'infer an appropriate level from the learner context', 120)
   const client = new GoogleGenAI({ apiKey: apiKey.trim() })
   const response = await client.models.generateContent({
@@ -87,7 +96,7 @@ export async function createInteractiveLesson(
           lessonRequest: request,
           topic,
           targetFocus: focus,
-          [lessonType === 'writing' ? 'writingTaskPart' : 'speakingPart']: part,
+          [partKey]: part,
           level,
         }),
       }],
@@ -95,9 +104,9 @@ export async function createInteractiveLesson(
     config: {
       responseMimeType: 'text/plain',
       abortSignal,
-      systemInstruction: `Create a complete, polished, adaptive and immediately usable HTML5 lesson for IELTS ${lessonType === 'writing' ? 'Writing' : 'Speaking'}. Return ONLY the complete HTML document (doctype, html, head, body). The host will render this document in a sandboxed iframe with scripts enabled but no network access, same-origin access, forms, popups, or top navigation. Therefore use only inline CSS and inline JavaScript: no external scripts, stylesheets, libraries, fonts, fetch, or network calls.
+      systemInstruction: `Create a complete, polished, adaptive and immediately usable HTML5 lesson for IELTS ${skillPractice}. Return ONLY the complete HTML document (doctype, html, head, body). The host will render this document in a sandboxed iframe with scripts enabled but no network access, same-origin access, forms, popups, or top navigation. Therefore use only inline CSS and inline JavaScript: no external scripts, stylesheets, libraries, fonts, fetch, or network calls.
 
-Build an engaging but readable responsive mini-learning experience with a clear lesson goal, concise teaching, realistic IELTS examples, definitions where useful, scaffolded practice, and at least two meaningful interactions (such as a quiz with feedback, revealable examples, a vocabulary exercise, answer builder, or skill-specific practice). Provide instant feedback and a visible completion action. Include semantic HTML, keyboard-friendly controls, accessible labels, adequate contrast and mobile-friendly typography. Adapt the difficulty and examples to the supplied learner context and focus on useful IELTS ${lessonType === 'writing' ? 'Writing practice' : 'Speaking practice'}, not generic filler. Do not include markdown fences. When possible mark completion buttons with data-speakia-action="complete" and hint buttons with data-speakia-action="hint". Keep the complete HTML under 70 KB. The page must work offline within the iframe. ${lessonType === 'writing' ? 'Use task-appropriate writing practice: task analysis, idea development, paragraph organization, precise vocabulary, grammar editing, guided revision, and transfer into a new writing context. Include short writing inputs with feedback rather than asking the learner to write a full essay. Never rewrite a complete response or treat an AI practice estimate as an official IELTS score.' : ''}`,
+Build an engaging but readable responsive mini-learning experience with a clear lesson goal, concise teaching, realistic IELTS examples, definitions where useful, scaffolded practice, and at least two meaningful interactions (such as a quiz with feedback, revealable examples, a vocabulary exercise, answer builder, or skill-specific practice). Provide instant feedback and a visible completion action. Include semantic HTML, keyboard-friendly controls, accessible labels, adequate contrast and mobile-friendly typography. Adapt the difficulty and examples to the supplied learner context and focus on useful IELTS ${skillPractice} practice, not generic filler. Do not include markdown fences. When possible mark completion buttons with data-speakia-action="complete" and hint buttons with data-speakia-action="hint". Keep the complete HTML under 70 KB. The page must work offline within the iframe. ${skillDetails}`,
     },
   })
   const rawHtml = response.text?.trim()

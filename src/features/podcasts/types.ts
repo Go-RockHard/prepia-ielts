@@ -18,16 +18,16 @@ export const PODCAST_HOST_PRESETS: Record<PodcastHostGender, string[]> = {
 }
 
 export const PODCAST_SCRIPT_MODELS = [
-  { id: 'gemini-3.8-flash', label: 'Prodia Core · balanced script generation' },
-  { id: 'gemini-3.6-flash', label: 'Prodia Podcast Balanced · balanced script generation' },
-  { id: 'gemini-3.5-flash-lite', label: 'Prodia Swift · efficient script generation' },
+  { id: 'gemini-3.8-flash', label: 'Prepia Core · balanced script generation' },
+  { id: 'gemini-3.6-flash', label: 'Prepia Podcast Balanced · balanced script generation' },
+  { id: 'gemini-3.5-flash-lite', label: 'Prepia Swift · efficient script generation' },
 ] as const
 
 export type PodcastScriptModel = typeof PODCAST_SCRIPT_MODELS[number]['id']
 
 export const PODCAST_TTS_MODELS = [
-  { id: 'gemini-3.8-flash-tts', label: 'Prodia Voice' },
-  { id: 'gemini-3.8-flash-lite-tts', label: 'Prodia Voice Compact' },
+  { id: 'gemini-3.8-flash-tts', label: 'Prepia Voice' },
+  { id: 'gemini-3.8-flash-lite-tts', label: 'Prepia Voice Compact' },
 ] as const
 
 export type PodcastTtsModel = typeof PODCAST_TTS_MODELS[number]['id']
@@ -41,7 +41,7 @@ export const PODCAST_LANGUAGES = [
 
 export type PodcastLanguage = typeof PODCAST_LANGUAGES[number]['id']
 export type PodcastPlaybackMode = 'recorded' | 'live'
-export type PodcastProduct = 'speakia' | 'writia'
+export type PodcastProduct = 'speakia' | 'writia' | 'readia' | 'listenia'
 export const PODCAST_TURN_COUNTS = [8, 10, 12, 14, 16, 18] as const
 export const DEFAULT_PODCAST_TURN_COUNT = 12
 

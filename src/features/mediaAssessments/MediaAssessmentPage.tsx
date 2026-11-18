@@ -21,9 +21,9 @@ type ArchiveFilter = 'all' | MediaAssessmentSource
 type DisplayCriterion = MediaAssessment['criteria'][number]
 
 const modelOptions: { value: MediaAssessmentModel; label: string }[] = [
-  { value: 'gemini-3.8-flash', label: 'Prodia Core · balanced assessment' },
-  { value: 'gemini-3.5-flash-lite', label: 'Prodia Swift · efficient assessment' },
-  { value: 'gemini-3.1-pro-preview', label: 'Prodia Reasoning · deeper analysis' },
+  { value: 'gemini-3.8-flash', label: 'Prepia Core · balanced assessment' },
+  { value: 'gemini-3.5-flash-lite', label: 'Prepia Swift · efficient assessment' },
+  { value: 'gemini-3.1-pro-preview', label: 'Prepia Reasoning · deeper analysis' },
 ]
 
 function formatAssessmentDuration(durationMs: number): string {
@@ -160,7 +160,7 @@ export function MediaAssessmentPage({ apiKey, onOpenSettings }: { apiKey: string
                 : <label className="media-input-label">YouTube URL <span>Public YouTube video link</span>
                   <input type="url" value={youtubeUrl} onChange={(event) => { setYoutubeUrl(event.target.value); setError('') }} placeholder="https://www.youtube.com/watch?v=…" />
                 </label>}
-              <label className="media-input-label media-model-label">Prodia assessment model
+              <label className="media-input-label media-model-label">Prepia assessment model
                 <select value={model} onChange={(event) => setModel(event.target.value as MediaAssessmentModel)}>{modelOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
               </label>
             </div>
@@ -182,7 +182,7 @@ export function MediaAssessmentPage({ apiKey, onOpenSettings }: { apiKey: string
           {filteredAssessments.length
             ? <div className="media-archive-list">{filteredAssessments.map((item) => <button key={item.id} className={`media-archive-item ${selectedAssessment?.id === item.id ? 'media-archive-item-active' : ''}`} aria-pressed={selectedAssessment?.id === item.id} onClick={() => setSelectedAssessmentId(item.id)}>
               <span className={`media-archive-icon media-archive-icon-${item.source}`}>{item.source === 'audio' ? <AudioLines size={17} /> : <Video size={17} />}</span>
-              <span className="media-archive-item-copy"><strong>{item.sourceName}</strong><small>{item.source === 'audio' ? 'Audio' : 'YouTube video'} · {formatDate(item.completedAt)}</small><small>{modelOptions.find((option) => option.value === item.model)?.label ?? (item.model === 'gemini-pro-latest' ? 'Prodia Reasoning' : 'Prodia assessment model')}{item.durationMs === undefined ? '' : ` · ${formatAssessmentDuration(item.durationMs)}`}</small></span>
+              <span className="media-archive-item-copy"><strong>{item.sourceName}</strong><small>{item.source === 'audio' ? 'Audio' : 'YouTube video'} · {formatDate(item.completedAt)}</small><small>{modelOptions.find((option) => option.value === item.model)?.label ?? (item.model === 'gemini-pro-latest' ? 'Prepia Reasoning' : 'Prepia assessment model')}{item.durationMs === undefined ? '' : ` · ${formatAssessmentDuration(item.durationMs)}`}</small></span>
               <span className="media-archive-band">{item.overallBand.toFixed(1)}<small>/9</small></span>
             </button>)}</div>
             : <Card className="media-archive-empty"><Clock3 size={20} /><strong>No {archiveFilter === 'all' ? '' : `${archiveFilter === 'youtube' ? 'video' : 'audio'} `}assessments yet</strong><p>Complete an assessment to save it here for review.</p></Card>}
@@ -311,7 +311,7 @@ function AssessmentDetails({ assessment }: { assessment: MediaAssessment }) {
   return <div className="media-assessment-results">
     <Card className="media-overall-card">
       <div><span className="section-kicker">OVERALL PRACTICE BAND</span><strong>{assessment.overallBand.toFixed(1)}<small> / 9</small></strong><Badge>Indicative only</Badge></div>
-      <div className="media-overall-meta"><span>{assessment.source === 'audio' ? <FileAudio size={15} /> : <Video size={15} />}{assessment.source === 'audio' ? 'Audio assessment' : 'YouTube assessment'}</span><small>{formatDate(assessment.completedAt)}</small>{assessment.durationMs !== undefined && <small>Completed in {formatAssessmentDuration(assessment.durationMs)}</small>}<small>{modelOptions.find((option) => option.value === assessment.model)?.label ?? (assessment.model === 'gemini-pro-latest' ? 'Prodia Reasoning' : 'Prodia assessment model')}</small></div>
+      <div className="media-overall-meta"><span>{assessment.source === 'audio' ? <FileAudio size={15} /> : <Video size={15} />}{assessment.source === 'audio' ? 'Audio assessment' : 'YouTube assessment'}</span><small>{formatDate(assessment.completedAt)}</small>{assessment.durationMs !== undefined && <small>Completed in {formatAssessmentDuration(assessment.durationMs)}</small>}<small>{modelOptions.find((option) => option.value === assessment.model)?.label ?? (assessment.model === 'gemini-pro-latest' ? 'Prepia Reasoning' : 'Prepia assessment model')}</small></div>
     </Card>
 
     <AssessmentMediaPlayer assessment={assessment} />

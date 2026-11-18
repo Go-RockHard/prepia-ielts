@@ -58,7 +58,7 @@ export function ProdiaModelPicker() {
       setTextModel(selected.id)
       setError('')
     } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : 'Unable to save the Prodia text model preference.')
+      setError(caughtError instanceof Error ? caughtError.message : 'Unable to save the Prepia text model preference.')
     }
   }
 
@@ -70,21 +70,21 @@ export function ProdiaModelPicker() {
       setLiveModel(selected.id)
       setError('')
     } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : 'Unable to save the Prodia Live model preference.')
+      setError(caughtError instanceof Error ? caughtError.message : 'Unable to save the Prepia Live model preference.')
     }
   }
 
   return (
     <div className="prodia-model-picker" ref={pickerRef}>
-      <button type="button" className="prodia-model-picker-trigger" aria-expanded={isOpen} aria-haspopup="true" onClick={() => setIsOpen((open) => !open)}><Sparkles size={14} /><span>Prodia IELTS Intelligence</span></button>
+      <button type="button" className="prodia-model-picker-trigger" aria-expanded={isOpen} aria-haspopup="true" onClick={() => setIsOpen((open) => !open)}><Sparkles size={14} /><span>Prepia IELTS Intelligence</span></button>
       {isOpen && <div className="prodia-model-menu">
-          <label htmlFor="prodia-text-model">Text and assessment intelligence<select id="prodia-text-model" aria-label="Default Prodia text intelligence for features without a dedicated selector" value={textModel} onChange={(event) => changeTextModel(event.target.value)}>
+          <label htmlFor="prodia-text-model">Text and assessment intelligence<select id="prodia-text-model" aria-label="Default Prepia text intelligence for features without a dedicated selector" value={textModel} onChange={(event) => changeTextModel(event.target.value)}>
             {GEMINI_TEXT_MODELS.map((option) => <option key={option.id} value={option.id}>{option.label} · {option.description}</option>)}
           </select></label>
-          <label htmlFor="prodia-live-model">Realtime voice intelligence<select id="prodia-live-model" aria-label="Default Prodia Live intelligence for realtime voice sessions" value={liveModel} onChange={(event) => changeLiveModel(event.target.value)}>
+          <label htmlFor="prodia-live-model">Realtime voice intelligence<select id="prodia-live-model" aria-label="Default Prepia Live intelligence for realtime voice sessions" value={liveModel} onChange={(event) => changeLiveModel(event.target.value)}>
             {GEMINI_LIVE_MODELS.map((option) => <option key={option.id} value={option.id}>{option.label} · {option.description}</option>)}
           </select></label>
-          <small>Defaults apply to workflows without their own selector. Prodia intelligence is powered by Google Gemini.</small>
+          <small>Defaults apply to workflows without their own selector. Prepia intelligence selects the right capability for each task.</small>
           {error && <span className="prodia-model-error" role="status">{error}</span>}
         </div>}
     </div>

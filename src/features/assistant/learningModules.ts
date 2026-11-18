@@ -118,11 +118,11 @@ function validateItems(value: unknown, kind: EmbeddedLearningModule['kind']): Le
   })
 }
 
-function makeDocument(kind: EmbeddedLearningModule['kind'], id: string, topic: string, items: LearningModuleItem[], lessonType: 'speaking' | 'writing'): string {
+function makeDocument(kind: EmbeddedLearningModule['kind'], id: string, topic: string, items: LearningModuleItem[], lessonType: 'speaking' | 'writing' | 'reading' | 'listening'): string {
   const itemJson = JSON.stringify(items).replace(/</g, '\\u003c')
   const safeId = JSON.stringify(id)
   const safeTopic = JSON.stringify(topic)
-  const skillName = lessonType === 'writing' ? 'Writing' : 'Speaking'
+  const skillName = lessonType === 'writing' ? 'Writing' : lessonType === 'reading' ? 'Reading' : lessonType === 'listening' ? 'Listening' : 'Speaking'
   const skillNameJson = JSON.stringify(skillName)
   const policy = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; img-src data:; connect-src \'none\'; frame-src \'none\'; object-src \'none\'; base-uri \'none\'; form-action \'none\'; navigate-to \'none\'">'
   const bridge = `<script>
@@ -164,7 +164,7 @@ function makeDocument(kind: EmbeddedLearningModule['kind'], id: string, topic: s
 export function createLearningModuleFromContent(
   kind: EmbeddedLearningModule['kind'],
   rawArgs: Record<string, unknown>,
-  lessonType: 'speaking' | 'writing' = 'speaking',
+  lessonType: 'speaking' | 'writing' | 'reading' | 'listening' = 'speaking',
 ): EmbeddedLearningModule {
   if (!isRecord(rawArgs)) throw new Error('The learning module content was incomplete. Please try again.')
   const title = typeof rawArgs.title === 'string' ? rawArgs.title.trim() : ''
@@ -194,13 +194,13 @@ export async function createLearningModule(
   learnerContext: unknown,
   model: string = getProdiaTextModel(),
   abortSignal?: AbortSignal,
-  lessonType: 'speaking' | 'writing' = 'speaking',
+  lessonType: 'speaking' | 'writing' | 'reading' | 'listening' = 'speaking',
 ): Promise<EmbeddedLearningModule> {
   if (!apiKey.trim()) throw new Error('Add your Speakia AI API key in Settings to create this learning module.')
   if (!isRecord(rawArgs)) throw new Error('The learning module request was incomplete. Please try again.')
   const request = typeof rawArgs.request === 'string' ? rawArgs.request.trim().slice(0, 800) : ''
   if (request.length < 3) throw new Error('Tell Speakia what you want to study.')
-  const skillName = lessonType === 'writing' ? 'Writing' : 'Speaking'
+  const skillName = lessonType === 'writing' ? 'Writing' : lessonType === 'reading' ? 'Reading' : lessonType === 'listening' ? 'Listening' : 'Speaking'
   const topic = typeof rawArgs.topic === 'string' && rawArgs.topic.trim() ? rawArgs.topic.trim().slice(0, 120) : `IELTS ${skillName}`
   const focus = typeof rawArgs.focus === 'string' && rawArgs.focus.trim() ? rawArgs.focus.trim().slice(0, 160) : `${skillName.toLocaleLowerCase()} test preparation`
   const level = typeof rawArgs.level === 'string' && rawArgs.level.trim() ? rawArgs.level.trim().slice(0, 100) : 'adapt to the supplied learner profile'

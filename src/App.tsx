@@ -17,6 +17,7 @@ import {
   EyeOff,
   Flame,
   Headphones,
+  History,
   Layers3,
   ListFilter,
   LayoutDashboard,
@@ -26,7 +27,6 @@ import {
   Menu,
   Mic2,
   Moon,
-  MoreHorizontal,
   Plus,
   Pin,
   Pencil,
@@ -40,6 +40,7 @@ import {
   Sun,
   Target,
   Trophy,
+  UserRound,
   X,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -94,6 +95,8 @@ import {
   saveUserProfile,
   type UserProfile,
 } from '@/features/profile/localAccount'
+import { loadSkillAttempts, type SkillAttempt } from '@/features/skills/literacyStorage'
+import type { LiteracyView } from '@/features/skills/SkillPracticeRunner'
 
 const Simulator = lazy(() => import('@/features/simulator/Simulator').then((module) => ({ default: module.Simulator })))
 const AssessmentView = lazy(() => import('@/features/simulator/AssessmentView').then((module) => ({ default: module.AssessmentView })))
@@ -113,8 +116,10 @@ const WritaPlatform = lazy(() => import('@/features/writing/WritaPlatform').then
 const SpeakiaLearnerProfilePage = lazy(() => import('@/features/profile/SpeakiaLearnerProfilePage').then((module) => ({ default: module.SpeakiaLearnerProfilePage })))
 const BandDescriptorsPage = lazy(() => import('@/features/bandDescriptors/BandDescriptorsPage').then((module) => ({ default: module.BandDescriptorsPage })))
 const PlacementAssessmentPage = lazy(() => import('@/features/placement/PlacementAssessmentPage').then((module) => ({ default: module.PlacementAssessmentPage })))
-
-type Section = 'Dashboard' | 'Learner Profile' | 'Vocabulary Studio' | 'Learning Library' | 'Topic Bank' | 'Vocabulary Bank' | 'Vocabulary Upgrade' | 'Smart lesson' | 'Speakia Coach Assets' | 'Assignments' | 'Speakia Flashcards' | 'Practice' | 'Speaking Drills' | 'Guided Practice' | 'Writia' | 'AI-to-AI Simulation' | 'Answer Builder' | 'Performance History' | 'Media assessments' | 'Speakia Podcasts' | 'Band Descriptors' | 'Placement Assessment' | 'Lexical Vault' | 'Profile' | 'Settings'
+const ReadiaPage = lazy(() => import('@/features/readia/ReadiaPage').then((module) => ({ default: module.ReadiaPage })))
+const ListeniaPage = lazy(() => import('@/features/listenia/ListeniaPage').then((module) => ({ default: module.ListeniaPage })))
+type Section = 'Home' | 'Dashboard' | 'Learner Profile' | 'Vocabulary Studio' | 'Learning Library' | 'Topic Bank' | 'Vocabulary Bank' | 'Vocabulary Upgrade' | 'Smart lesson' | 'Speakia Coach Assets' | 'Assignments' | 'Speakia Flashcards' | 'Practice' | 'Speaking Drills' | 'Guided Practice' | 'Writia' | 'AI-to-AI Simulation' | 'Answer Builder' | 'Performance History' | 'Media assessments' | 'Speakia Podcasts' | 'Band Descriptors' | 'Placement Assessment' | 'Lexical Vault' | 'Profile' | 'Settings'
+type LearningPlatform = 'speakia' | 'writa' | 'readia' | 'listenia'
 type LearningLibraryTab = 'topic-bank' | 'lexical-vault' | 'vocabulary-builder'
 type PracticeTab = 'actual' | 'guided'
 type HistoryReviewAction = 'open' | 'transcript' | 'report' | 'reassess'
@@ -126,6 +131,7 @@ function isPracticeModeAssessment(result: TestResult): boolean {
 }
 
 const navItems: { label: Section; icon: typeof LayoutDashboard }[] = [
+  { label: 'Home', icon: LayoutDashboard },
   { label: 'Dashboard', icon: LayoutDashboard },
   { label: 'Learner Profile', icon: Sparkles },
   { label: 'Vocabulary Studio', icon: BookOpen },
@@ -142,7 +148,30 @@ const navItems: { label: Section; icon: typeof LayoutDashboard }[] = [
   { label: 'Band Descriptors', icon: BookOpen },
   { label: 'Placement Assessment', icon: Target },
   { label: 'Writia', icon: PenLine },
-  { label: 'Settings', icon: Settings },
+]
+const readiaNavItems: { id: LiteracyView; label: string; icon: typeof LayoutDashboard }[] = [
+  { id: 'home', label: 'Reading Library', icon: LayoutDashboard },
+  { id: 'learner-profile', label: 'Reading Learner Profile', icon: UserRound },
+  { id: 'practice', label: 'Reading Practice', icon: BookOpen },
+  { id: 'drills', label: 'Reading Drills', icon: Lightbulb },
+  { id: 'assignments', label: 'Reading Assignments', icon: ClipboardCheck },
+  { id: 'placement', label: 'Reading Placement', icon: Target },
+  { id: 'performance-history', label: 'Reading Performance History', icon: History },
+  { id: 'podcasts', label: 'Readia Podcasts', icon: Podcast },
+  { id: 'coach-assets', label: 'Readia Coach Assets', icon: Layers3 },
+  { id: 'content', label: 'Content Studio', icon: Layers3 },
+]
+const listeniaNavItems: { id: LiteracyView; label: string; icon: typeof LayoutDashboard }[] = [
+  { id: 'home', label: 'Listening Library', icon: LayoutDashboard },
+  { id: 'learner-profile', label: 'Listening Learner Profile', icon: UserRound },
+  { id: 'practice', label: 'Listening Practice', icon: Headphones },
+  { id: 'drills', label: 'Listening Drills', icon: Lightbulb },
+  { id: 'assignments', label: 'Listening Assignments', icon: ClipboardCheck },
+  { id: 'placement', label: 'Listening Placement', icon: Target },
+  { id: 'performance-history', label: 'Listening Performance History', icon: History },
+  { id: 'podcasts', label: 'Listenia Podcasts', icon: Podcast },
+  { id: 'coach-assets', label: 'Listenia Coach Assets', icon: Layers3 },
+  { id: 'content', label: 'Content Studio', icon: Layers3 },
 ]
 const sectionDisplayNames: Partial<Record<Section, string>> = {
   'Vocabulary Studio': 'Topics & Vocabulary',
@@ -254,16 +283,17 @@ function daysUntil(date: string): number {
 }
 
 function App() {
-  const [activeSection, setActiveSection] = useState<Section>('Dashboard')
-  const [activePlatform, setActivePlatform] = useState<'speakia' | 'writa'>('speakia')
+  const [activeSection, setActiveSection] = useState<Section>('Home')
+  const [activePlatform, setActivePlatform] = useState<LearningPlatform>('speakia')
   const [writaModule, setWritaModule] = useState<WritaModuleId>('dashboard')
+  const [readiaView, setReadiaView] = useState<LiteracyView>('home')
+  const [listeniaView, setListeniaView] = useState<LiteracyView>('home')
   const [writaExamLaunchRequest, setWritaExamLaunchRequest] = useState<string | null>(null)
   const [bandDescriptorFocus, setBandDescriptorFocus] = useState<{ criterion: string; band: number } | null>(null)
   const [learningLibraryTab, setLearningLibraryTab] = useState<LearningLibraryTab>('topic-bank')
   const [practiceTab, setPracticeTab] = useState<PracticeTab>('actual')
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [confirmSignOut, setConfirmSignOut] = useState(false)
-  const [showPlatformLauncher, setShowPlatformLauncher] = useState(false)
   const [savedWords, setSavedWords] = useState<string[]>(loadSavedLexicalIds)
   const [pinnedLearningIds, setPinnedLearningIds] = useState<string[]>(loadPinnedLearningIds)
   const [customLexicalEntries, setCustomLexicalEntries] = useState<LexicalEntry[]>(loadLexicalEntries)
@@ -758,9 +788,8 @@ function App() {
     setUserProfile(profile)
     setAssignments(loadAssignments(profile.username))
     setSelectedAssignment(null)
-    setActiveSection('Dashboard')
+    setActiveSection('Home')
     setActivePlatform('speakia')
-    setShowPlatformLauncher(true)
   }
 
   async function handleSaveProfile(profile: UserProfile) {
@@ -815,7 +844,7 @@ function App() {
       setUserProfile(null)
       setAssignments([])
       setSelectedAssignment(null)
-      setActiveSection('Dashboard')
+      setActiveSection('Home')
       setActivePlatform('speakia')
       setMobileMenuOpen(false)
     } catch (error) {
@@ -824,7 +853,7 @@ function App() {
     }
   }
 
-  if (authLoading) return <div className="auth-loading" role="status">Loading your Prodia learning workspace…</div>
+  if (authLoading) return <div className="auth-loading" role="status">Loading your Prepia learning workspace…</div>
   if (!userProfile) return showAuthPage
     ? <LocalAuthPage
       initialMode={authInitialMode}
@@ -832,61 +861,45 @@ function App() {
       onBack={() => setShowAuthPage(false)}
     />
     : <ProdiaHomePage onGetStarted={() => { setAuthInitialMode('create'); setShowAuthPage(true) }} onSignIn={() => { setAuthInitialMode('signin'); setShowAuthPage(true) }} />
-  if (showPlatformLauncher) return (
-    <main className="platform-launcher-page">
-      <motion.section className="platform-launcher-card" initial={shouldReduceMotion ? false : { opacity: 0, y: 18, scale: .985 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: shouldReduceMotion ? 0 : .38, ease: 'easeOut' }}>
-        <div className="platform-launcher-art" aria-hidden="true">
-          <span className="platform-launcher-orbit platform-launcher-orbit-one" />
-          <span className="platform-launcher-orbit platform-launcher-orbit-two" />
-          <span className="platform-launcher-star platform-launcher-star-one">✦</span>
-          <span className="platform-launcher-star platform-launcher-star-two">✧</span>
-          <span className="platform-launcher-art-speak"><AudioLines size={22} /></span>
-          <span className="platform-launcher-art-write"><PenLine size={21} /></span>
-          <span className="platform-launcher-art-core"><Sparkles size={24} /></span>
-        </div>
-        <div className="platform-launcher-brand"><span className="platform-launcher-brand-mark"><AudioLines size={19} /><PenLine size={17} /></span><span>PRODIA IELTS</span></div>
-        <p className="platform-launcher-eyebrow">TWO PRODUCTIVE SKILLS. ONE SMARTER ROUTE.</p>
-        <h1>Make every practice session <em>count.</em></h1>
-        <p className="platform-launcher-description">Purpose-built AI coaching for IELTS Speaking and Writing—personalised to your goals, evidence, and next best step.</p>
-        <div className="platform-launcher-divider"><span />CHOOSE YOUR WORKSPACE<span /></div>
-        <div className="platform-launcher-options">
-          <button type="button" className="platform-launcher-option platform-launcher-speaking" onClick={() => { setActivePlatform('speakia'); setActiveSection('Dashboard'); setMobileMenuOpen(false); setShowPlatformLauncher(false) }}>
-            <span className="platform-launcher-option-icon"><AudioLines size={19} /></span>
-            <span className="platform-launcher-option-copy"><strong>Speakia IELTS</strong><small>Build confident, fluent speaking</small><span>Practise live · Get precise feedback</span></span>
-            <ArrowRight size={20} className="platform-launcher-option-arrow" />
-          </button>
-          <button type="button" className="platform-launcher-option platform-launcher-writing" onClick={() => { setActivePlatform('writa'); setWritaModule('dashboard'); setMobileMenuOpen(false); setShowPlatformLauncher(false) }}>
-            <span className="platform-launcher-option-icon"><PenLine size={19} /></span>
-            <span className="platform-launcher-option-copy"><strong>Writia IELTS</strong><small>Write with clarity and control</small><span>Plan · Draft · Improve</span></span>
-            <ArrowRight size={20} className="platform-launcher-option-arrow" />
-          </button>
-        </div>
-        <p className="platform-launcher-footnote"><Sparkles size={13} /> Two productive skills. One connected learning journey.</p>
-      </motion.section>
-    </main>
-  )
-
   return (
     <div className="app-shell">
       <GeminiQuotaNotice platform={activePlatform} />
       {mobileMenuOpen && <button className="sidebar-scrim" aria-label="Close menu" onClick={() => setMobileMenuOpen(false)} />}
-      <aside className={`sidebar ${activePlatform === 'writa' ? 'writa-sidebar' : ''} ${mobileMenuOpen ? 'sidebar-open' : ''}`}>
-        <a className="brand" href="#" onClick={(event) => { event.preventDefault(); setMobileMenuOpen(false); if (activePlatform === 'writa') setWritaModule('studio'); else navigate('Dashboard') }}>
-          <span className="brand-mark">{activePlatform === 'writa' ? <PenLine size={21} strokeWidth={2.4} /> : <AudioLines size={21} strokeWidth={2.4} />}</span>
-          <span className="brand-copy"><strong>{activePlatform === 'writa' ? 'Writia IELTS' : 'Speakia IELTS'}</strong>{activePlatform === 'writa' ? <><small>Writing Practice Studio</small><small>Plan · Write · Improve</small></> : <><small>Realistic Test Simulation.</small><small>Accurate Band Assessment</small></>}</span>
+      <aside className={`sidebar ${activePlatform === 'writa' ? 'writa-sidebar' : activePlatform === 'readia' ? 'readia-sidebar' : activePlatform === 'listenia' ? 'listenia-sidebar' : ''} ${mobileMenuOpen ? 'sidebar-open' : ''}`}>
+        <a className="brand" href="#" onClick={(event) => { event.preventDefault(); setMobileMenuOpen(false); setActiveSection('Home') }}>
+          <span className="brand-mark">{activePlatform === 'writa' ? <PenLine size={21} strokeWidth={2.4} /> : activePlatform === 'readia' ? <BookOpen size={21} strokeWidth={2.4} /> : activePlatform === 'listenia' ? <Headphones size={21} strokeWidth={2.4} /> : <AudioLines size={21} strokeWidth={2.4} />}</span>
+          <span className="brand-copy"><strong>{activePlatform === 'writa' ? 'Writia IELTS' : activePlatform === 'readia' ? 'Readia IELTS' : activePlatform === 'listenia' ? 'Listenia IELTS' : 'Speakia IELTS'}</strong>{activePlatform === 'writa' ? <><small>Writing Practice Studio</small><small>Plan · Write · Improve</small></> : activePlatform === 'readia' ? <><small>Reading Practice Studio</small><small>Read · Locate · Review</small></> : activePlatform === 'listenia' ? <><small>Listening Practice Studio</small><small>Listen · Identify · Review</small></> : <><small>Realistic Test Simulation.</small><small>Accurate Band Assessment</small></>}</span>
         </a>
-        <div className="workspace-label">{activePlatform === 'writa' ? 'WRITING WORKSPACE' : 'YOUR WORKSPACE'}</div>
-        <nav className="main-nav" aria-label={activePlatform === 'writa' ? 'Writia navigation' : 'Main navigation'}>
+        <div className="workspace-label">{activePlatform === 'writa' ? 'WRITING WORKSPACE' : activePlatform === 'readia' ? 'READING WORKSPACE' : activePlatform === 'listenia' ? 'LISTENING WORKSPACE' : 'YOUR WORKSPACE'}</div>
+        <nav className="main-nav" aria-label={activePlatform === 'writa' ? 'Writia navigation' : activePlatform === 'readia' ? 'Readia navigation' : activePlatform === 'listenia' ? 'Listenia navigation' : 'Main navigation'}>
           {activePlatform === 'writa'
             ? <>
+              <button className={`nav-link ${activeSection === 'Home' ? 'nav-link-active' : ''}`} aria-current={activeSection === 'Home' ? 'page' : undefined} onClick={() => { setActiveSection('Home'); setMobileMenuOpen(false) }}><LayoutDashboard size={18} strokeWidth={1.8} /><span>Home</span></button>
               {writaNavItems.map(({ id, label, icon: Icon }) => (
-                <button key={id} className={`nav-link ${writaModule === id ? 'nav-link-active' : ''}`} aria-current={writaModule === id ? 'page' : undefined} onClick={() => { setWritaModule(id); setMobileMenuOpen(false) }}>
+                <button key={id} className={`nav-link ${activeSection !== 'Home' && writaModule === id ? 'nav-link-active' : ''}`} aria-current={activeSection !== 'Home' && writaModule === id ? 'page' : undefined} onClick={() => { setWritaModule(id); setActiveSection('Dashboard'); setMobileMenuOpen(false) }}>
                   <Icon size={18} strokeWidth={1.8} /><span>{label}</span>
                 </button>
               ))}
-              <button className="nav-link" onClick={() => { setActivePlatform('speakia'); navigate('Settings') }}><Settings size={18} strokeWidth={1.8} /><span>Shared Settings</span></button>
             </>
-            : navItems.map(({ label, icon: Icon }) => (
+            : activePlatform === 'readia'
+              ? <>
+                <button className={`nav-link ${activeSection === 'Home' ? 'nav-link-active' : ''}`} aria-current={activeSection === 'Home' ? 'page' : undefined} onClick={() => { setActiveSection('Home'); setMobileMenuOpen(false) }}><LayoutDashboard size={18} strokeWidth={1.8} /><span>Home</span></button>
+                {readiaNavItems.map(({ id, label, icon: Icon }) => (
+                  <button key={id} className={`nav-link ${activeSection !== 'Home' && readiaView === id ? 'nav-link-active' : ''}`} aria-current={activeSection !== 'Home' && readiaView === id ? 'page' : undefined} onClick={() => { setReadiaView(id); setActiveSection('Dashboard'); setMobileMenuOpen(false) }}>
+                    <Icon size={18} strokeWidth={1.8} /><span>{label}</span>
+                  </button>
+                ))}
+              </>
+              : activePlatform === 'listenia'
+                ? <>
+                  <button className={`nav-link ${activeSection === 'Home' ? 'nav-link-active' : ''}`} aria-current={activeSection === 'Home' ? 'page' : undefined} onClick={() => { setActiveSection('Home'); setMobileMenuOpen(false) }}><LayoutDashboard size={18} strokeWidth={1.8} /><span>Home</span></button>
+                  {listeniaNavItems.map(({ id, label, icon: Icon }) => (
+                    <button key={id} className={`nav-link ${activeSection !== 'Home' && listeniaView === id ? 'nav-link-active' : ''}`} aria-current={activeSection !== 'Home' && listeniaView === id ? 'page' : undefined} onClick={() => { setListeniaView(id); setActiveSection('Dashboard'); setMobileMenuOpen(false) }}>
+                      <Icon size={18} strokeWidth={1.8} /><span>{label}</span>
+                    </button>
+                  ))}
+                </>
+              : navItems.map(({ label, icon: Icon }) => (
               <button key={label} className={`nav-link ${activeSection === label ? 'nav-link-active' : ''}`} onClick={() => navigate(label)}>
                 <Icon size={18} strokeWidth={1.8} />
                 <span>{sectionDisplayNames[label] ?? label}</span>
@@ -895,42 +908,44 @@ function App() {
               </button>
             ))}
         </nav>
-        <div className="profile-actions">
-          <button className="profile-button" onClick={() => { if (activePlatform === 'writa') setActivePlatform('speakia'); navigate('Profile') }}>
-            <span className="avatar">{(userProfile.displayName || userProfile.username).slice(0, 1).toLocaleUpperCase()}</span>
-            <span className="profile-copy"><strong>{userProfile.displayName || userProfile.username}</strong><small>Local profile</small></span>
-            <MoreHorizontal size={19} className="profile-more" />
-          </button>
-          <button className="profile-signout" onClick={() => setConfirmSignOut(true)} aria-label="Sign out" title="Sign out"><LogOut size={16} /></button>
-        </div>
       </aside>
-      <main className={`main-area ${activePlatform === 'writa' ? 'main-area-writa' : ''}`}>
+      <main className={`main-area ${activePlatform === 'writa' ? 'main-area-writa' : activePlatform === 'readia' ? 'main-area-literacy main-area-readia' : activePlatform === 'listenia' ? 'main-area-literacy main-area-listenia' : ''}`}>
         <header className="topbar">
-          <div className="breadcrumb"><button className="mobile-menu-button" aria-label={`Open ${activePlatform} navigation`} onClick={() => setMobileMenuOpen(true)}><Menu size={20} /></button><span>Workspace</span><ChevronRight size={14} /><strong>{activePlatform === 'writa' ? writaNavItems.find((item) => item.id === writaModule)?.label ?? 'Writia' : sectionDisplayNames[activeSection] ?? activeSection}</strong></div>
+          <div className="breadcrumb"><button className="mobile-menu-button" aria-label={`Open ${activePlatform} navigation`} onClick={() => setMobileMenuOpen(true)}><Menu size={20} /></button><span>Prepia</span><ChevronRight size={14} /><strong>{activeSection === 'Home' || activeSection === 'Settings' || activeSection === 'Profile' ? activeSection : activePlatform === 'writa' ? writaNavItems.find((item) => item.id === writaModule)?.label ?? 'Writia' : activePlatform === 'readia' ? readiaNavItems.find((item) => item.id === readiaView)?.label ?? 'Readia' : activePlatform === 'listenia' ? listeniaNavItems.find((item) => item.id === listeniaView)?.label ?? 'Listenia' : sectionDisplayNames[activeSection] ?? activeSection}</strong></div>
           <div className="topbar-actions">
-            <ProdiaModelPicker />
+            <button type="button" className={`global-home-button ${activeSection === 'Home' ? 'global-home-button-active' : ''}`} onClick={() => { setActiveSection('Home'); setMobileMenuOpen(false) }} aria-current={activeSection === 'Home' ? 'page' : undefined}><LayoutDashboard size={15} /><span>Home</span></button>
             <div className="platform-switch" role="group" aria-label="Switch platform">
-              <button type="button" className={activePlatform === 'speakia' ? 'platform-switch-active' : ''} aria-pressed={activePlatform === 'speakia'} onClick={() => { setActivePlatform('speakia'); setMobileMenuOpen(false) }}><AudioLines size={15} /><span>Speakia</span></button>
-              <button type="button" className={activePlatform === 'writa' ? 'platform-switch-active' : ''} aria-pressed={activePlatform === 'writa'} onClick={() => { setActivePlatform('writa'); setMobileMenuOpen(false) }}><PenLine size={15} /><span>Writia</span></button>
+              <button type="button" aria-label="Open Speakia" title="Speakia" className={activePlatform === 'speakia' ? 'platform-switch-active' : ''} aria-pressed={activePlatform === 'speakia'} onClick={() => { setActivePlatform('speakia'); setActiveSection('Dashboard'); setMobileMenuOpen(false) }}><AudioLines size={15} /><span>Speak</span></button>
+              <button type="button" aria-label="Open Writia" title="Writia" className={activePlatform === 'writa' ? 'platform-switch-active' : ''} aria-pressed={activePlatform === 'writa'} onClick={() => { setActivePlatform('writa'); setActiveSection('Dashboard'); setWritaModule('dashboard'); setMobileMenuOpen(false) }}><PenLine size={15} /><span>Write</span></button>
+              <button type="button" aria-label="Open Readia" title="Readia" className={activePlatform === 'readia' ? 'platform-switch-active' : ''} aria-pressed={activePlatform === 'readia'} onClick={() => { setActivePlatform('readia'); setActiveSection('Dashboard'); setReadiaView('home'); setMobileMenuOpen(false) }}><BookOpen size={15} /><span>Read</span></button>
+              <button type="button" aria-label="Open Listenia" title="Listenia" className={activePlatform === 'listenia' ? 'platform-switch-active' : ''} aria-pressed={activePlatform === 'listenia'} onClick={() => { setActivePlatform('listenia'); setActiveSection('Dashboard'); setListeniaView('home'); setMobileMenuOpen(false) }}><Headphones size={15} /><span>Listen</span></button>
             </div>
+            <ProdiaModelPicker />
             {activePlatform === 'speakia'
               ? <NotificationCenter username={userProfile.username} apiKeyAvailable={Boolean(apiKey.trim())} assignments={assignments} results={practiceModuleTests} placementCompleted={Boolean(userProfile.speakingPlacementAssessment)} onNavigate={navigate} />
-              : <WritiaNotificationCenter key={userProfile.username} username={userProfile.username} apiKeyAvailable={Boolean(apiKey.trim())} assignments={writiaLearnerContext.assignments} assessments={writiaLearnerContext.assessments} placementCompleted={Boolean(userProfile.writingPlacementAssessment)} onNavigate={setWritaModule} onOpenSettings={() => { setActivePlatform('speakia'); navigate('Settings') }} />}
+              : activePlatform === 'writa' ? <WritiaNotificationCenter key={userProfile.username} username={userProfile.username} apiKeyAvailable={Boolean(apiKey.trim())} assignments={writiaLearnerContext.assignments} assessments={writiaLearnerContext.assessments} placementCompleted={Boolean(userProfile.writingPlacementAssessment)} onNavigate={(module) => { setWritaModule(module); setActiveSection('Dashboard') }} onOpenSettings={() => setActiveSection('Settings')} /> : null}
             <button className="icon-button theme-toggle" aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`} title={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`} onClick={() => setTheme((current) => current === 'light' ? 'dark' : 'light')}><motion.span key={theme} initial={shouldReduceMotion ? false : { opacity: 0, rotate: -35, scale: .8 }} animate={{ opacity: 1, rotate: 0, scale: 1 }} transition={{ duration: shouldReduceMotion ? 0 : .2 }}>{theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}</motion.span></button>
-            <button className="avatar top-avatar top-avatar-button" onClick={() => { if (activePlatform === 'writa') setActivePlatform('speakia'); navigate('Profile') }} aria-label="Open your profile">{(userProfile.displayName || userProfile.username).slice(0, 1).toLocaleUpperCase()}</button>
+            <button className="icon-button global-settings-button" onClick={() => { setActiveSection('Settings'); setMobileMenuOpen(false) }} aria-label="Open shared settings" title="Shared settings"><Settings size={18} /></button>
+            <button className="icon-button global-signout-button" onClick={() => setConfirmSignOut(true)} aria-label="Sign out" title="Sign out"><LogOut size={17} /></button>
+            <button className="avatar top-avatar top-avatar-button" onClick={() => { setActiveSection('Profile'); setMobileMenuOpen(false) }} aria-label={`Open ${userProfile.displayName || userProfile.username}'s profile`} title="Your profile">{(userProfile.displayName || userProfile.username).slice(0, 1).toLocaleUpperCase()}</button>
           </div>
         </header>
         {storageWarning && <p className="storage-warning" role="status">{storageWarning}</p>}
         <AnimatePresence mode="wait">
           <motion.div
-            key={activePlatform === 'writa' ? 'writa-platform' : activeSection}
+            key={activeSection === 'Home' || activeSection === 'Settings' || activeSection === 'Profile' ? activeSection : activePlatform === 'writa' ? 'writa-platform' : activePlatform === 'readia' || activePlatform === 'listenia' ? activePlatform : activeSection}
             initial={shouldReduceMotion ? false : { opacity: 0, y: 5 }}
             animate={{ opacity: 1, y: 0 }}
             exit={shouldReduceMotion ? { opacity: 1 } : { opacity: 0, y: -4 }}
             transition={{ duration: shouldReduceMotion ? 0 : 0.18 }}
           >
             <Suspense fallback={null}>
-              {activePlatform === 'writa' ? <WritaPlatform apiKey={apiKey} username={userProfile.username} profile={userProfile} speakingResults={practiceModuleTests} module={writaModule} onModuleChange={setWritaModule} onOpenSettings={() => { setActivePlatform('speakia'); navigate('Settings') }} onOpenProfile={() => { setActivePlatform('speakia'); navigate('Profile') }} onSavePlacementAssessment={(assessment) => handleSaveProfile({ ...userProfile, writingPlacementAssessment: assessment })} onLearnerDataChange={setWritiaLearnerContext} examLaunchRequest={writaExamLaunchRequest} onExamLaunchHandled={() => setWritaExamLaunchRequest(null)} /> : <>
+              {activeSection === 'Home' ? <PrepiaWorkspaceHome profile={userProfile} onOpenSkill={(platform) => { setActivePlatform(platform); setActiveSection('Dashboard'); if (platform === 'writa') setWritaModule('dashboard'); if (platform === 'readia') setReadiaView('home'); if (platform === 'listenia') setListeniaView('home') }} onNavigate={(section) => { setActivePlatform('speakia'); navigate(section) }} />
+                : activeSection === 'Settings' ? <SettingsPage apiKey={apiKey} fallbackApiKeys={fallbackApiKeys} onSaveApiKeys={handleSaveApiKeys} assessmentModel={assessmentModel} onAssessmentModelChange={handleAssessmentModelChange} assistantChatModel={assistantChatModel} assistantToolModel={assistantToolModel} onAssistantModelChange={handleAssistantModelChange} theme={theme} onThemeChange={() => setTheme((current) => current === 'light' ? 'dark' : 'light')} />
+                  : activeSection === 'Profile' ? <ProfilePage profile={userProfile} onSave={handleSaveProfile} />
+              : activePlatform === 'writa' ? <WritaPlatform apiKey={apiKey} username={userProfile.username} profile={userProfile} speakingResults={practiceModuleTests} module={writaModule} onModuleChange={setWritaModule} onOpenSettings={() => setActiveSection('Settings')} onOpenProfile={() => setActiveSection('Profile')} onSavePlacementAssessment={(assessment) => handleSaveProfile({ ...userProfile, writingPlacementAssessment: assessment })} onLearnerDataChange={setWritiaLearnerContext} examLaunchRequest={writaExamLaunchRequest} onExamLaunchHandled={() => setWritaExamLaunchRequest(null)} />
+                : activePlatform === 'readia' ? <ReadiaPage username={userProfile.username} profile={userProfile} testType={userProfile.testType} view={readiaView} onViewChange={(view) => { setReadiaView(view); setActiveSection('Dashboard') }} apiKey={apiKey} onOpenSettings={() => setActiveSection('Settings')} onSaveProfile={handleSaveProfile} targetBand={userProfile.readingTargetBand} studyGoal={userProfile.readingStudyGoal} chatModel={assistantChatModel} toolModel={assistantToolModel} onChatModelChange={(model) => handleAssistantModelChange('chat', model)} />
+                    : activePlatform === 'listenia' ? <ListeniaPage username={userProfile.username} profile={userProfile} testType={userProfile.testType} view={listeniaView} onViewChange={(view) => { setListeniaView(view); setActiveSection('Dashboard') }} apiKey={apiKey} onOpenSettings={() => setActiveSection('Settings')} onSaveProfile={handleSaveProfile} targetBand={userProfile.listeningTargetBand} studyGoal={userProfile.listeningStudyGoal} chatModel={assistantChatModel} toolModel={assistantToolModel} onChatModelChange={(model) => handleAssistantModelChange('chat', model)} /> : <>
               {activeSection === 'Dashboard' && <Dashboard onNavigate={navigate} onOpenTest={openTestInHistory} completedTests={practiceModuleTests} savedLexicalCount={savedWords.length} profile={userProfile} />}
               {activeSection === 'Learner Profile' && <SpeakiaLearnerProfilePage speakingResults={completedTests} profile={userProfile} onNavigate={navigate} onOpenPlacement={() => navigate('Placement Assessment')} onOpenAssessment={openTestInHistory} />}
               {activeSection === 'Placement Assessment' && <PlacementAssessmentPage skill="speaking" apiKey={apiKey} speakingModel={assessmentModel} testType={userProfile.testType} result={userProfile.speakingPlacementAssessment} onComplete={(assessment) => handleSaveProfile({ ...userProfile, speakingPlacementAssessment: assessment })} />}
@@ -974,8 +989,6 @@ function App() {
               {activeSection === 'Band Descriptors' && <BandDescriptorsPage product="speaking" initialCriterion={bandDescriptorFocus?.criterion} initialBand={bandDescriptorFocus?.band} />}
               {activeSection === 'Media assessments' && <MediaAssessmentPage apiKey={apiKey} onOpenSettings={() => navigate('Settings')} />}
               {activeSection === 'Speakia Podcasts' && <PodcastsPage username={userProfile.username} profile={userProfile} apiKey={apiKey} results={completedTests} lexicalEntries={lexicalEntries} assignments={assignments} />}
-              {activeSection === 'Profile' && <ProfilePage profile={userProfile} onSave={handleSaveProfile} />}
-              {activeSection === 'Settings' && <SettingsPage apiKey={apiKey} fallbackApiKeys={fallbackApiKeys} onSaveApiKeys={handleSaveApiKeys} assessmentModel={assessmentModel} onAssessmentModelChange={handleAssessmentModelChange} assistantChatModel={assistantChatModel} assistantToolModel={assistantToolModel} onAssistantModelChange={handleAssistantModelChange} theme={theme} onThemeChange={() => setTheme((current) => current === 'light' ? 'dark' : 'light')} />}
               </>}
             </Suspense>
           </motion.div>
@@ -993,10 +1006,10 @@ function App() {
           <div><Button type="button" variant="outline" onClick={() => setConfirmSignOut(false)}>Stay signed in</Button><Button type="button" className="signout-confirm-button" onClick={handleSignOut}>Sign out</Button></div>
         </section>
       </div>}
-      {<SpeakiaAssistant
+      {activePlatform !== 'readia' && activePlatform !== 'listenia' && <SpeakiaAssistant
         key={activePlatform}
         platform={activePlatform === 'writa' ? 'writing' : 'speaking'}
-        activeSection={activePlatform === 'writa' ? 'Writia' : activeSection}
+        activeSection={activePlatform === 'writa' ? 'Writia' : activeSection === 'Home' ? 'Dashboard' : activeSection}
         activeWritaModule={activePlatform === 'writa' ? writaModule : undefined}
         results={practiceModuleTests}
         lexicalEntries={lexicalEntries}
@@ -1027,9 +1040,9 @@ function App() {
 function ProdiaHomePage({ onGetStarted, onSignIn }: { onGetStarted: () => void; onSignIn: () => void }) {
   return <main className="prodia-home">
     <header className="prodia-home-nav">
-      <a className="prodia-home-brand" href="#home" aria-label="Prodia IELTS home">
+      <a className="prodia-home-brand" href="#home" aria-label="Prepia IELTS home">
         <span className="prodia-home-brand-mark"><AudioLines size={19} /><PenLine size={17} /></span>
-        <span><strong>prodia<span>.</span></strong><small>IELTS PREPARATION PLATFORM</small></span>
+        <span><strong>prepia<span>.</span></strong><small>IELTS PREPARATION PLATFORM</small></span>
       </a>
       <nav aria-label="Main navigation">
         <a href="#platforms">Platforms</a>
@@ -1043,7 +1056,7 @@ function ProdiaHomePage({ onGetStarted, onSignIn }: { onGetStarted: () => void; 
 
     <section className="prodia-home-hero" id="home">
       <div className="prodia-home-hero-copy">
-        <span className="prodia-home-eyebrow"><Sparkles size={14} /> SPEAKING · WRITING · ASSESSMENT</span>
+        <span className="prodia-home-eyebrow"><Sparkles size={14} /> SPEAKING · WRITING · READING · LISTENING</span>
         <h1>Your IELTS journey,<br /><em>intelligently guided.</em></h1>
         <p className="prodia-home-tagline">Prepare for IELTS with purpose. Perform with confidence.</p>
         <p className="prodia-home-intro">Practise with AI coaches, experience realistic IELTS simulations, receive personalised feedback, and build the skills to move towards your target band.</p>
@@ -1053,11 +1066,11 @@ function ProdiaHomePage({ onGetStarted, onSignIn }: { onGetStarted: () => void; 
         </div>
         <div className="prodia-home-trust-line"><span><Check size={14} /> Personalised practice</span><i /><span><Check size={14} /> Skill-specific coaching</span><i /><span><Check size={14} /> Meaningful progress</span></div>
       </div>
-      <div className="prodia-home-hero-visual" aria-label="Prodia connects focused IELTS speaking and writing practice">
+      <div className="prodia-home-hero-visual" aria-label="Prepia IELTS connects focused practice across all four skills">
         <div className="prodia-home-visual-glow" />
         <div className="prodia-home-visual-orbit prodia-home-visual-orbit-one" />
         <div className="prodia-home-visual-orbit prodia-home-visual-orbit-two" />
-        <div className="prodia-home-visual-center"><span className="prodia-home-brand-mark"><AudioLines size={24} /><PenLine size={21} /></span><strong>prodia<span>.</span></strong><small>IELTS, intelligently guided</small></div>
+        <div className="prodia-home-visual-center"><span className="prodia-home-brand-mark"><AudioLines size={24} /><PenLine size={21} /></span><strong>prepia<span>.</span></strong><small>IELTS, intelligently guided</small></div>
         <div className="prodia-home-float-card prodia-home-float-speaking"><span><AudioLines size={17} /></span><div><strong>Speakia</strong><small>Speak with confidence</small></div></div>
         <div className="prodia-home-float-card prodia-home-float-writing"><span><PenLine size={17} /></span><div><strong>Writia</strong><small>Write with purpose</small></div></div>
         <span className="prodia-home-visual-spark prodia-home-spark-one">✦</span>
@@ -1067,9 +1080,9 @@ function ProdiaHomePage({ onGetStarted, onSignIn }: { onGetStarted: () => void; 
 
     <section className="prodia-home-platforms" id="platforms">
       <div className="prodia-home-section-heading">
-        <span className="prodia-home-eyebrow">TWO SPECIALISED PLATFORMS</span>
-        <h2>One goal. <em>Two skills to master.</em></h2>
-        <p>Choose the focused IELTS practice you need today. Your Prodia journey brings both productive skills together.</p>
+        <span className="prodia-home-eyebrow">FOUR SPECIALISED SKILL WORKSPACES</span>
+        <h2>One goal. <em>All four skills to master.</em></h2>
+        <p>Choose the IELTS skill you want to strengthen. Prepia brings focused practice and AI-guided learning together in one connected journey.</p>
       </div>
       <div className="prodia-home-product-grid">
         <article className="prodia-home-product prodia-home-product-speaking">
@@ -1088,6 +1101,22 @@ function ProdiaHomePage({ onGetStarted, onSignIn }: { onGetStarted: () => void; 
           <ul><li><Check size={15} /> Academic and General Training tasks</li><li><Check size={15} /> Plan, compose, and refine your writing</li><li><Check size={15} /> Writing-specific practice and feedback</li></ul>
           <button type="button" className="prodia-home-product-link" onClick={onGetStarted}>Explore Writia <ArrowRight size={16} /></button>
         </article>
+        <article className="prodia-home-product prodia-home-product-reading">
+          <div className="prodia-home-product-top"><span className="prodia-home-product-icon"><BookOpen size={20} /></span><span className="prodia-home-product-label">IELTS READING</span></div>
+          <h3>Readia</h3>
+          <p className="prodia-home-product-promise">Your focused AI Reading Studio</p>
+          <p>Build reading accuracy with original passages, IELTS question types, timed simulations, and guided evidence-finding practice.</p>
+          <ul><li><Check size={15} /> Practise varied IELTS question formats</li><li><Check size={15} /> Find evidence and track your accuracy</li><li><Check size={15} /> Get real-time strategy guidance</li></ul>
+          <button type="button" className="prodia-home-product-link" onClick={onGetStarted}>Explore Readia <ArrowRight size={16} /></button>
+        </article>
+        <article className="prodia-home-product prodia-home-product-listening">
+          <div className="prodia-home-product-top"><span className="prodia-home-product-icon"><Headphones size={20} /></span><span className="prodia-home-product-label">IELTS LISTENING</span></div>
+          <h3>Listenia</h3>
+          <p className="prodia-home-product-promise">Your focused AI Listening Studio</p>
+          <p>Train your ear with spoken practice, IELTS-style tasks, timed simulations, and real-time support for listening strategies.</p>
+          <ul><li><Check size={15} /> Practise varied IELTS question formats</li><li><Check size={15} /> Replay audio and review your answers</li><li><Check size={15} /> Get real-time listening guidance</li></ul>
+          <button type="button" className="prodia-home-product-link" onClick={onGetStarted}>Explore Listenia <ArrowRight size={16} /></button>
+        </article>
       </div>
     </section>
 
@@ -1102,13 +1131,13 @@ function ProdiaHomePage({ onGetStarted, onSignIn }: { onGetStarted: () => void; 
         <article><span>02</span><div><strong>Practise with guidance</strong><p>Use specialised AI coaching, realistic simulations, and structured activities.</p></div></article>
         <article><span>03</span><div><strong>Use feedback to grow</strong><p>Understand what is working and decide on a practical next step.</p></div></article>
       </div>
-      <p className="prodia-home-disclaimer">Prodia’s AI-generated assessment feedback is an indicative learning estimate, not an official IELTS result.</p>
+      <p className="prodia-home-disclaimer">Prepia’s AI-generated assessment feedback is an indicative learning estimate, not an official IELTS result.</p>
     </section>
 
     <footer className="prodia-home-footer">
-      <a className="prodia-home-brand" href="#home"><span className="prodia-home-brand-mark"><AudioLines size={17} /><PenLine size={15} /></span><span><strong>prodia<span>.</span></strong><small>PREPARE WITH PURPOSE.</small></span></a>
+      <a className="prodia-home-brand" href="#home"><span className="prodia-home-brand-mark"><AudioLines size={17} /><PenLine size={15} /></span><span><strong>prepia<span>.</span></strong><small>PREPARE WITH PURPOSE.</small></span></a>
       <span>Personalised learning. Intelligent coaching. Meaningful progress.</span>
-      <button type="button" onClick={onSignIn}>Sign in to Prodia <ArrowRight size={14} /></button>
+      <button type="button" onClick={onSignIn}>Sign in to Prepia <ArrowRight size={14} /></button>
     </footer>
   </main>
 }
@@ -1140,11 +1169,11 @@ function LocalAuthPage({ onAuthenticate, initialMode, onBack }: { onAuthenticate
   return <main className="auth-page">
     <div className="auth-layout auth-layout-solo">
       <motion.section className="auth-card" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: .25 }}>
-      <button type="button" className="auth-back-home" onClick={onBack}><ArrowRight size={15} /> Back to Prodia IELTS</button>
-      <div className="auth-brand"><span className="brand-mark"><AudioLines size={23} /></span><div><strong>Prodia IELTS</strong><span>Your personalised AI IELTS learning platform</span><span>Speakia · Speaking &nbsp;|&nbsp; Writia · Writing</span></div></div>
-      <p className="eyebrow">ONE IELTS JOURNEY · TWO PRODUCTIVE SKILLS</p>
+      <button type="button" className="auth-back-home" onClick={onBack}><ArrowRight size={15} /> Back to Prepia IELTS</button>
+      <div className="auth-brand"><span className="brand-mark"><AudioLines size={23} /></span><div><strong>Prepia IELTS</strong><span>Your personalised AI IELTS learning platform</span><span>Speakia · Speaking &nbsp;|&nbsp; Writia · Writing &nbsp;|&nbsp; Readia · Reading &nbsp;|&nbsp; Listenia · Listening</span></div></div>
+      <p className="eyebrow">ONE IELTS JOURNEY · FOUR SKILL WORKSPACES</p>
       <h1>{mode === 'signin' ? 'Welcome back' : 'Set up your local account'}</h1>
-      <p className="auth-description">{mode === 'signin' ? 'Sign in once to reach Speakia for Speaking and Writia for Writing, the productive half of IELTS’ four skills.' : 'Create one local account for Speakia (Speaking) and Writia (Writing), your two productive IELTS skills.'}</p>
+      <p className="auth-description">{mode === 'signin' ? 'Sign in once to reach all four focused IELTS workspaces: Speakia, Writia, Readia, and Listenia.' : 'Create one local account to practise IELTS Speaking, Writing, Reading, and Listening across four connected skill workspaces.'}</p>
       <div className="auth-mode-tabs" role="tablist" aria-label="Local account options">
         <button role="tab" aria-selected={mode === 'signin'} className={mode === 'signin' ? 'auth-mode-active' : ''} onClick={() => { setMode('signin'); setError('') }}>Sign in</button>
         <button role="tab" aria-selected={mode === 'create'} className={mode === 'create' ? 'auth-mode-active' : ''} onClick={() => { setMode('create'); setError('') }}>Create account</button>
@@ -1152,13 +1181,13 @@ function LocalAuthPage({ onAuthenticate, initialMode, onBack }: { onAuthenticate
       <form className="auth-form" onSubmit={(event) => void submit(event)}>
         <label>Username<input autoComplete="username" minLength={3} maxLength={32} value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Choose a username" required /></label>
         <label>Password<span className="auth-password-field"><input type={passwordVisible ? 'text' : 'password'} autoComplete={mode === 'signin' ? 'current-password' : 'new-password'} value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Enter your local password" required /><button type="button" className="auth-password-toggle" aria-label={passwordVisible ? 'Hide password' : 'Show password'} aria-pressed={passwordVisible} onClick={() => setPasswordVisible((visible) => !visible)}>{passwordVisible ? <EyeOff size={17} /> : <Eye size={17} />}</button></span></label>
-        {mode === 'signin' && <label className="auth-remember-option"><input type="checkbox" checked={rememberMe} onChange={(event) => setRememberMe(event.target.checked)} /><span><strong>Remember me on this device</strong><small>Stay signed in and remember your username. Your password itself is never stored by Prodia.</small></span></label>}
+        {mode === 'signin' && <label className="auth-remember-option"><input type="checkbox" checked={rememberMe} onChange={(event) => setRememberMe(event.target.checked)} /><span><strong>Remember me on this device</strong><small>Stay signed in and remember your username. Your password itself is never stored by Prepia.</small></span></label>}
         <p className={`auth-password-hint ${mode !== 'create' ? 'auth-password-hint-hidden' : ''}`}>Choose any password you’ll remember.</p>
         <p className={`auth-error auth-error-slot ${error ? '' : 'auth-error-hidden'}`} role={error ? 'alert' : undefined}>{error || ' '}</p>
         <Button className="auth-submit" type="submit" disabled={busy}>{busy ? 'Please wait…' : mode === 'signin' ? 'Sign in' : 'Create local account'} <ArrowRight size={16} /></Button>
       </form>
       <div className="auth-local-notice"><LockKeyhole size={15} /><p>Local prototype only: accounts and profile data stay in this browser. This is not server authentication; anyone with browser access can inspect or alter local data. Do not reuse a sensitive password.</p></div>
-      <button type="button" className="auth-tour-toggle" aria-haspopup="dialog" onClick={() => setFeatureTourOpen(true)}><Sparkles size={15} /> Explore Prodia’s feature tour <ArrowRight size={14} /></button>
+      <button type="button" className="auth-tour-toggle" aria-haspopup="dialog" onClick={() => setFeatureTourOpen(true)}><Sparkles size={15} /> Explore Prepia’s feature tour <ArrowRight size={14} /></button>
       </motion.section>
     </div>
     {featureTourOpen && <div className="auth-tour-backdrop" onMouseDown={(event) => {
@@ -1166,7 +1195,7 @@ function LocalAuthPage({ onAuthenticate, initialMode, onBack }: { onAuthenticate
     }} onKeyDown={(event) => {
       if (event.key === 'Escape') setFeatureTourOpen(false)
     }} role="presentation" tabIndex={-1}>
-      <section className="auth-tour-dialog" role="dialog" aria-modal="true" aria-label="Prodia IELTS feature tour">
+      <section className="auth-tour-dialog" role="dialog" aria-modal="true" aria-label="Prepia IELTS feature tour">
         <button type="button" className="auth-tour-close" aria-label="Close feature tour" onClick={() => setFeatureTourOpen(false)}><X size={18} /></button>
         <FeatureTour />
       </section>
@@ -1199,6 +1228,8 @@ function ProfilePage({ profile, onSave }: { profile: UserProfile; onSave: (profi
         studyGoal: form.speakingStudyGoal.trim(),
         speakingStudyGoal: form.speakingStudyGoal.trim(),
         writingStudyGoal: form.writingStudyGoal.trim(),
+        readingStudyGoal: form.readingStudyGoal?.trim() ?? '',
+        listeningStudyGoal: form.listeningStudyGoal?.trim() ?? '',
       }
       await onSave(cleanedProfile)
       setMessage('Your profile was saved in this browser.')
@@ -1211,7 +1242,7 @@ function ProfilePage({ profile, onSave }: { profile: UserProfile; onSave: (profi
   }
 
   return <div className="page-content inner-page profile-page">
-    <PageHeading eyebrow="YOUR PERSONAL SETTINGS" title="Your profile" description="Manage your shared IELTS details and separate Speaking and Writing preparation goals." />
+    <PageHeading eyebrow="YOUR PERSONAL SETTINGS" title="Your profile" description="Manage your shared IELTS details and separate preparation goals for all four skills." />
     <Card className="profile-summary-card"><span className="profile-summary-avatar">{(form.displayName || form.username).slice(0, 1).toLocaleUpperCase()}</span><div><span className="section-kicker">LOCAL ACCOUNT</span><strong>{form.displayName || form.username}</strong><p>@{form.username}</p></div><Badge className="local-account-badge"><LockKeyhole size={13} /> Stored on this browser</Badge></Card>
     <Card className="profile-form-card"><div className="profile-form-heading"><span className="section-kicker">SPEAKING &amp; WRITING PREPARATION</span><h2>Combined IELTS profile</h2><p>Share your IELTS test type while keeping each skill’s date, target band, and learning goal distinct.</p></div>
       {form.speakingTestDate && <div className={`test-countdown ${testDays !== null && testDays < 0 ? 'test-countdown-past' : ''}`}><CalendarDays size={19} /><div><strong>{testDays === null ? 'Set your Speaking test date' : testDays < 0 ? 'Speaking test date has passed' : testDays === 0 ? 'Your Speaking test is today' : `${testDays} days to your Speaking test`}</strong><span>{new Intl.DateTimeFormat('en', { dateStyle: 'long' }).format(new Date(`${form.speakingTestDate}T00:00:00`))}</span></div></div>}
@@ -1241,12 +1272,110 @@ function ProfilePage({ profile, onSave }: { profile: UserProfile; onSave: (profi
             <label className="profile-goal-field">Writing study goal<textarea value={form.writingStudyGoal} onChange={(event) => update('writingStudyGoal', event.target.value)} placeholder="What would you most like to improve in Writing?" rows={3} /></label>
           </div>
         </fieldset>
+        <fieldset className="profile-form-section">
+          <legend>Reading preparation</legend>
+          <div className="profile-form-section-grid">
+            <label>Reading test date<input type="date" value={form.readingTestDate ?? ''} onChange={(event) => update('readingTestDate', event.target.value)} /></label>
+            <label>Target Reading band<select value={form.readingTargetBand ?? ''} onChange={(event) => update('readingTargetBand', event.target.value)}><option value="">Not set</option>{[5, 5.5, 6, 6.5, 7, 7.5, 8, 8.5, 9].map((band) => <option key={band} value={band}>Band {band.toFixed(1)}</option>)}</select></label>
+            <label className="profile-goal-field">Reading study goal<textarea value={form.readingStudyGoal ?? ''} onChange={(event) => update('readingStudyGoal', event.target.value)} placeholder="What would you most like to improve in Reading?" rows={3} /></label>
+          </div>
+        </fieldset>
+        <fieldset className="profile-form-section">
+          <legend>Listening preparation</legend>
+          <div className="profile-form-section-grid">
+            <label>Listening test date<input type="date" value={form.listeningTestDate ?? ''} onChange={(event) => update('listeningTestDate', event.target.value)} /></label>
+            <label>Target Listening band<select value={form.listeningTargetBand ?? ''} onChange={(event) => update('listeningTargetBand', event.target.value)}><option value="">Not set</option>{[5, 5.5, 6, 6.5, 7, 7.5, 8, 8.5, 9].map((band) => <option key={band} value={band}>Band {band.toFixed(1)}</option>)}</select></label>
+            <label className="profile-goal-field">Listening study goal<textarea value={form.listeningStudyGoal ?? ''} onChange={(event) => update('listeningStudyGoal', event.target.value)} placeholder="What would you most like to improve in Listening?" rows={3} /></label>
+          </div>
+        </fieldset>
         {message && <p className={`profile-save-message ${message.startsWith('Your profile') ? 'profile-save-success' : 'auth-error'}`} role="status">{message}</p>}
         <div className="profile-form-actions"><Button className="start-button" type="submit" disabled={saving}><Save size={16} /> {saving ? 'Saving…' : 'Save profile'}</Button></div>
       </form>
     </Card>
     <p className="profile-storage-note"><LockKeyhole size={14} /> Your profile is stored in this browser’s IndexedDB. Clearing site data removes the local account and profile.</p>
   </div>
+}
+
+function PrepiaWorkspaceHome({ profile, onOpenSkill, onNavigate }: { profile: UserProfile; onOpenSkill: (platform: LearningPlatform) => void; onNavigate: (section: Section) => void }) {
+  const [receptiveAttempts, setReceptiveAttempts] = useState<SkillAttempt[] | null>(null)
+  const [receptiveError, setReceptiveError] = useState('')
+  const skills: { platform: LearningPlatform; name: string; description: string; details: string; icon: typeof AudioLines; className: string }[] = [
+    { platform: 'speakia', name: 'Speaking', description: 'Build confident, fluent answers.', details: 'Live practice · Band feedback', icon: AudioLines, className: 'prepia-skill-speaking' },
+    { platform: 'writa', name: 'Writing', description: 'Plan, draft, and improve your work.', details: 'Task practice · Guided feedback', icon: PenLine, className: 'prepia-skill-writing' },
+    { platform: 'readia', name: 'Reading', description: 'Read strategically and find evidence.', details: 'Passage practice · Review', icon: BookOpen, className: 'prepia-skill-reading' },
+    { platform: 'listenia', name: 'Listening', description: 'Train your ear for key details.', details: 'Audio practice · Replay & review', icon: Headphones, className: 'prepia-skill-listening' },
+  ]
+
+  useEffect(() => {
+    let active = true
+    void Promise.all([
+      loadSkillAttempts(profile.username, 'readia'),
+      loadSkillAttempts(profile.username, 'listenia'),
+    ]).then(([reading, listening]) => {
+      if (!active) return
+      setReceptiveAttempts([...reading, ...listening])
+      setReceptiveError('')
+    }).catch((error: unknown) => {
+      console.error('Unable to load local receptive-skill progress for Prepia Home.', error)
+      if (active) setReceptiveError(error instanceof Error ? error.message : 'Reading and listening progress could not be loaded.')
+    })
+    return () => { active = false }
+  }, [profile.username])
+
+  const receptiveProgress = (product: SkillAttempt['product']) => {
+    const attempts = receptiveAttempts?.filter((attempt) => attempt.product === product) ?? []
+    const earned = attempts.reduce((total, attempt) => total + attempt.score, 0)
+    const possible = attempts.reduce((total, attempt) => total + attempt.total, 0)
+    return { attempts: attempts.length, accuracy: possible ? Math.round(earned / possible * 100) : null }
+  }
+  const readingProgress = receptiveProgress('readia')
+  const listeningProgress = receptiveProgress('listenia')
+
+  return (
+    <div className="page-content prepia-home-page">
+      <div className="prepia-home-heading">
+        <div>
+          <p className="eyebrow">YOUR PREPIA IELTS WORKSPACE</p>
+          <h1>Welcome back, {profile.displayName || profile.username}<span className="wave">✳</span></h1>
+          <p className="page-subtitle">One home for every skill. Choose where you want to make progress today.</p>
+        </div>
+        {profile.testDate && <div className="prepia-home-test-date"><CalendarDays size={16} /><span>{dashboardCountdown(profile.testDate)}</span></div>}
+      </div>
+
+      <section className="prepia-home-skills" aria-label="Choose an IELTS skill">
+        {skills.map(({ platform, name, description, details, icon: Icon, className }) => (
+          <button key={platform} type="button" className={`prepia-home-skill-card ${className}`} onClick={() => onOpenSkill(platform)}>
+            <span className="prepia-home-skill-icon"><Icon size={20} /></span>
+            <span className="prepia-home-skill-copy"><strong>{name}</strong><span>{description}</span><small>{details}</small></span>
+            <ArrowRight size={18} className="prepia-home-skill-arrow" />
+          </button>
+        ))}
+      </section>
+
+      <section className="prepia-home-receptive" aria-label="Reading and listening progress">
+        <div className="prepia-home-receptive-heading"><div><p className="section-kicker">YOUR RECEPTIVE SKILLS</p><h2>Reading &amp; Listening progress</h2></div><span>Local attempt data</span></div>
+        {receptiveError && <p className="literacy-error" role="alert">{receptiveError}</p>}
+        <div className="prepia-home-receptive-grid">
+          {[{ platform: 'readia' as const, label: 'Reading', data: readingProgress }, { platform: 'listenia' as const, label: 'Listening', data: listeningProgress }].map(({ platform, label, data }) => (
+            <button type="button" className={`prepia-home-receptive-card prepia-skill-${platform === 'readia' ? 'reading' : 'listening'}`} key={platform} onClick={() => onOpenSkill(platform)}>
+              <span><strong>{label}</strong><small>{data.attempts} completed {data.attempts === 1 ? 'attempt' : 'attempts'}</small></span>
+              <span><strong>{receptiveAttempts === null ? '—' : data.accuracy === null ? '—' : `${data.accuracy}%`}</strong><small>{data.accuracy === null ? 'accuracy not yet available' : 'observed accuracy'}</small></span>
+              <ArrowRight size={17} />
+            </button>
+          ))}
+        </div>
+        <p className="prepia-home-receptive-note">Accuracy is calculated from completed local attempts; it is not an official IELTS band estimate.</p>
+      </section>
+
+      <section className="prepia-home-next">
+        <div className="prepia-home-next-icon"><Sparkles size={19} /></div>
+        <div><p className="section-kicker">YOUR NEXT STEP</p><h2>Small, focused practice adds up.</h2><p>Pick a skill above to continue where you left off, or review your speaking progress and plan your next session.</p></div>
+        <Button variant="outline" onClick={() => onNavigate('Learner Profile')}>View your progress <ArrowRight size={15} /></Button>
+      </section>
+
+      <p className="prepia-home-footer"><span><Check size={14} /></span> Four dedicated skill studios, connected in one learning workspace.</p>
+    </div>
+  )
 }
 
 function Dashboard({ onNavigate, onOpenTest, completedTests, savedLexicalCount, profile }: { onNavigate: (section: Section) => void; onOpenTest: (result: TestResult) => void; completedTests: TestResult[]; savedLexicalCount: number; profile: UserProfile }) {

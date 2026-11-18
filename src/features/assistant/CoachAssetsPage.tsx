@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { BarChart3, BookOpen, ClipboardCheck, Headphones, Layers3, Presentation, Search, Sparkles, X } from 'lucide-react'
-import type { CoachAsset } from './assetsStorage'
+import type { CoachAsset, CoachAssetPlatform } from './assetsStorage'
 import { coachAssetsUpdatedEvent, loadCoachAssets, saveCoachAssetInteraction } from './assetsStorage'
 import { AdaptiveQuizWidget } from './AdaptiveQuizWidget'
 import { InlineAudioLesson } from './InlineAudioLesson'
@@ -31,12 +31,15 @@ function assetLabel(kind: CoachAsset['kind']): string {
 }
 
 export function CoachAssetsPage({ platform = 'speaking', onOpenCoach, onAdapt }: {
-  platform?: 'speaking' | 'writing'
+  platform?: CoachAssetPlatform
   onOpenCoach: () => void
   onAdapt: (asset: InteractiveLesson | EmbeddedLearningModule) => void
 }) {
   const isWriting = platform === 'writing'
-  const coachName = isWriting ? 'Writia Assistant' : 'Speakia Coach'
+  const coachName = platform === 'writing' ? 'Writia Assistant'
+    : platform === 'reading' ? 'Readia Assistant'
+      : platform === 'listening' ? 'Listenia Assistant'
+        : 'Speakia Coach'
   const [assets, setAssets] = useState(() => loadCoachAssets(platform))
   const [kind, setKind] = useState<AssetKind>('all')
   const [topic, setTopic] = useState('All topics')
@@ -95,7 +98,7 @@ export function CoachAssetsPage({ platform = 'speaking', onOpenCoach, onAdapt }:
   return <div className="page-content inner-page coach-assets-page">
     <div className="inner-page-heading">
       <div><p className="eyebrow">YOUR {isWriting ? 'WRITIA ASSISTANT' : 'SPEAKIA COACH'} LIBRARY</p><h1>{isWriting ? 'Writia Coach Assets' : 'Speakia Coach Assets'}</h1><p className="page-subtitle">Every lesson, flashcard set, deck, quiz, and audio lesson your {isWriting ? 'Writia Assistant' : 'Speakia Coach'} has created—organized in one place.</p></div>
-      <button className="start-button coach-assets-create" type="button" onClick={onOpenCoach}><Sparkles size={15} /> {isWriting ? 'Ask Writia' : 'Ask Speakia'}</button>
+      <button className="start-button coach-assets-create" type="button" onClick={onOpenCoach}><Sparkles size={15} /> Ask {coachName}</button>
     </div>
     <section className="coach-assets-overview" aria-label="Asset library summary">
       <span className="coach-assets-overview-icon"><Layers3 size={22} /></span>
@@ -138,6 +141,6 @@ export function CoachAssetsPage({ platform = 'speaking', onOpenCoach, onAdapt }:
               : <InlineInteractiveLesson key={asset.id} lesson={asset.kind === 'lesson' ? asset.lesson : asset.module} onProgress={recordInteraction} onAdapt={onAdapt} />}
         </div>}
       </article>
-    })}</div> : <section className="coach-assets-empty"><span className="coach-assets-empty-icon"><Sparkles size={22} /></span><h2>{assets.length ? 'No assets match those filters' : `${coachName} library is ready for its first asset`}</h2><p>{assets.length ? 'Try a different search or category, or clear the topic filter.' : `Ask ${coachName} to create an interactive lesson, audio lesson, flashcard set, slide deck, quiz${isWriting ? '' : ', or infographic'}. New assets will appear here and stay available in chat.`}</p>{assets.length ? <button type="button" onClick={() => { setSearch(''); setTopic('All topics'); setKind('all') }}>Clear filters</button> : <button type="button" onClick={onOpenCoach}><Sparkles size={15} /> {isWriting ? 'Ask Writia' : 'Ask Speakia'}</button>}</section>}
+    })}</div> : <section className="coach-assets-empty"><span className="coach-assets-empty-icon"><Sparkles size={22} /></span><h2>{assets.length ? 'No assets match those filters' : `${coachName} library is ready for its first asset`}</h2><p>{assets.length ? 'Try a different search or category, or clear the topic filter.' : `Ask ${coachName} to create an interactive lesson, audio lesson, flashcard set, slide deck, quiz${isWriting ? '' : ', or infographic'}. New assets will appear here and stay available in chat.`}</p>{assets.length ? <button type="button" onClick={() => { setSearch(''); setTopic('All topics'); setKind('all') }}>Clear filters</button> : <button type="button" onClick={onOpenCoach}><Sparkles size={15} /> Ask {coachName}</button>}</section>}
   </div>
 }

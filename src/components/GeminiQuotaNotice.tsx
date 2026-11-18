@@ -3,9 +3,9 @@ import { AnimatePresence, motion } from 'framer-motion'
 import { AlertTriangle, X } from 'lucide-react'
 import { GEMINI_QUOTA_NOTICE_EVENT, type GeminiQuotaNoticeDetail } from '@/lib/geminiQuota'
 
-export function GeminiQuotaNotice({ platform = 'speakia' }: { platform?: 'speakia' | 'writa' }) {
+export function GeminiQuotaNotice({ platform = 'speakia' }: { platform?: 'speakia' | 'writa' | 'readia' | 'listenia' }) {
   const [detail, setDetail] = useState<GeminiQuotaNoticeDetail | null>(null)
-  const platformName = platform === 'writa' ? 'Writia' : 'Speakia'
+  const platformName = platform === 'writa' ? 'Writia' : platform === 'readia' ? 'Readia' : platform === 'listenia' ? 'Listenia' : 'Speakia'
 
   useEffect(() => {
     function showNotice(event: Event) {

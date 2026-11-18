@@ -110,9 +110,9 @@ export function SettingsPage({
     <div className="page-content inner-page settings-page">
       <div className="inner-page-heading">
         <div>
-          <p className="eyebrow">SPEAKIA + WRITIA</p>
+          <p className="eyebrow">PREPIA IELTS</p>
           <h1>Shared settings</h1>
-          <p className="page-subtitle">One place for your connected productive-skills platforms: Speakia IELTS Speaking and Writia IELTS Writing.</p>
+          <p className="page-subtitle">One place for the connected Prepia IELTS workspaces: Speakia, Writia, Readia, and Listenia.</p>
         </div>
         <Button variant="outline" onClick={() => setShowPromptLibrary(true)}><Sparkles size={15} /> Prompt Engineering / Library</Button>
       </div>
@@ -120,7 +120,7 @@ export function SettingsPage({
       <Card className="settings-card">
         <div className="settings-card-heading">
           <span className="settings-icon"><KeyRound size={19} /></span>
-          <div><h2>Shared AI connection</h2><p>One primary key and optional fallbacks power coaching and assessment across Speakia and Writia. Prodia model names are friendly aliases for the Google Gemini models used by this connection.</p></div>
+          <div><h2>Shared AI connection</h2><p>One primary key and optional fallbacks power coaching and assessment across Prepia IELTS. Model choices use Prepia names and are selected automatically or per workflow.</p></div>
           <Badge className={currentDraftKey.trim() ? 'settings-status-connected' : 'settings-status-missing'}>{currentDraftKey.trim() ? `${1 + fallbackCount} KEY${fallbackCount ? 'S' : ''} AVAILABLE` : 'PRIMARY KEY REQUIRED'}</Badge>
         </div>
         <form className="settings-key-form" onSubmit={(event) => void saveKey(event)}>
@@ -167,9 +167,9 @@ export function SettingsPage({
       <Card className="settings-card">
         <div className="settings-card-heading">
           <span className="settings-icon settings-icon-mint"><Save size={19} /></span>
-          <div><h2>Speakia practice defaults</h2><p>Choose which Prodia model evaluates IELTS Speaking practice.</p></div>
+          <div><h2>Speakia practice defaults</h2><p>Choose which Prepia model evaluates IELTS Speaking practice.</p></div>
         </div>
-        <label className="settings-select-label" htmlFor="settings-assessment-model">Prodia Speaking assessment model</label>
+        <label className="settings-select-label" htmlFor="settings-assessment-model">Prepia Speaking assessment model</label>
         <select id="settings-assessment-model" className="settings-select" value={assessmentModel} onChange={(event) => onAssessmentModelChange(event.target.value as AssessmentModel)}>
           {ASSESSMENT_MODELS.map((model) => <option key={model.id} value={model.id}>{model.label} · {model.description}</option>)}
         </select>
@@ -179,7 +179,7 @@ export function SettingsPage({
       <Card className="settings-card">
         <div className="settings-card-heading">
           <span className="settings-icon settings-icon-mint"><PenLine size={19} /></span>
-          <div><h2>Writia writing &amp; Coach</h2><p>Set Prodia writing assessment defaults and how Writia Coach communicates with you.</p></div>
+          <div><h2>Writia writing &amp; Coach</h2><p>Set Prepia writing assessment defaults and how Writia Coach communicates with you.</p></div>
         </div>
         <label className="settings-select-label" htmlFor="settings-writia-assessment-model">Writing assessment model</label>
         <select id="settings-writia-assessment-model" className="settings-select" value={writiaAssessmentModel} onChange={(event) => {
@@ -214,13 +214,13 @@ export function SettingsPage({
       <Card className="settings-card">
         <div className="settings-card-heading">
           <span className="settings-icon"><MessageCircle size={19} /></span>
-          <div><h2>Prodia text models</h2><p>Choose the Prodia model for assistant conversations and interactive learning tools.</p></div>
+          <div><h2>Prepia text models</h2><p>Choose the Prepia model for assistant conversations and interactive learning tools.</p></div>
         </div>
         <label className="settings-select-label" htmlFor="settings-assistant-chat-model">Standard text chat model</label>
         <select id="settings-assistant-chat-model" className="settings-select" value={assistantChatModel} onChange={(event) => onAssistantModelChange('chat', event.target.value as AssistantModel)}>
           {ASSISTANT_MODELS.map((model) => <option key={model.id} value={model.id}>{model.label} · {model.description}{model.id === 'gemini-3.8-flash' ? ' (default)' : ''}</option>)}
         </select>
-        <p className="settings-help">Used for regular typed conversation and assistant replies. Default: Prodia Core.</p>
+        <p className="settings-help">Used for regular typed conversation and assistant replies. Default: Prepia Core.</p>
         <label className="settings-select-label" htmlFor="settings-assistant-tool-model">Learning tool and fallback model</label>
         <select id="settings-assistant-tool-model" className="settings-select" value={assistantToolModel} onChange={(event) => onAssistantModelChange('tool', event.target.value as AssistantModel)}>
           {ASSISTANT_MODELS.map((model) => <option key={model.id} value={model.id}>{model.label} · {model.description}{model.id === 'gemini-3.8-flash' ? ' (default fallback)' : ''}</option>)}

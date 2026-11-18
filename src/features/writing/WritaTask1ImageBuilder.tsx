@@ -149,6 +149,6 @@ export function WritaTask1ImageBuilder({
     </div>
     {previewUrl && <div className="writa-task-image-preview"><img src={previewUrl} alt="Selected IELTS Task 1 chart preview" /><button type="button" onClick={() => setFile(null)} aria-label="Remove selected image"><X size={15} /></button></div>}
     {error && <p className="writa-alert" role="alert">{error}</p>}
-    <small>PNG, JPEG or WebP · maximum 8 MB. The selected image is sent to your configured Gemini model for analysis; the saved task and source image remain in this browser.</small>
+    <small>PNG, JPEG or WebP · maximum 8 MB. The selected image is sent to your configured Prepia model for analysis; the saved task and source image remain in this browser.</small>
   </section>
 }

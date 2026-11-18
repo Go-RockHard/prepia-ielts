@@ -25,7 +25,7 @@ import { shareAudioWithCoach } from '@/features/assistant/audioSharing'
 import { SpeechHighlight } from '@/features/simulator/SpeechHighlight'
 import { transcriptPositionAtTime, wordIndexAtElapsed } from '@/features/simulator/speechTiming'
 import { deletePodcastAudio, loadPodcastAudio, savePodcastAudio } from './audioStorage'
-import { generateSpeakiaPodcast, generateWritiaPodcast, synthesizePodcastAudio } from './podcastGeneration'
+import { generateLiteracyPodcast, generateSpeakiaPodcast, generateWritiaPodcast, synthesizePodcastAudio } from './podcastGeneration'
 import { loadPodcasts, savePodcasts } from './storage'
 import { useLivePodcast } from './useLivePodcast'
 import {
@@ -45,6 +45,7 @@ import {
   type PodcastWritingAssessment,
   type SpeakiaPodcast,
 } from './types'
+import type { SkillAttempt } from '@/features/skills/literacyStorage'
 
 interface PodcastHostChoice extends PodcastHost {
   customName: boolean
@@ -114,6 +115,22 @@ const writiaPodcastTopics = [
   'Task 2 ideas, paragraph development, and argument',
   'Precise vocabulary and grammatical control',
   'From writing drills to independent task performance',
+]
+
+const readiaPodcastTopics = [
+  'Build a reliable passage-reading routine',
+  'Find evidence and recognize paraphrases',
+  'Improve matching headings and information questions',
+  'Handle True, False, and Not Given accurately',
+  'Manage time across Reading passages',
+]
+
+const listeniaPodcastTopics = [
+  'Predict answers before the recording',
+  'Follow signposting and speaker changes',
+  'Recognize distractors and paraphrases',
+  'Improve form, note, and summary completion',
+  'Recover after missing a listening answer',
 ]
 
 function loadPodcastModelPreference<T extends string>(
@@ -229,6 +246,7 @@ export function PodcastsPage({
   product = 'speakia',
   writingAssessments = [],
   writingAssignments = [],
+  literacyAttempts = [],
 }: {
   username: string
   profile: UserProfile
@@ -239,9 +257,10 @@ export function PodcastsPage({
   product?: PodcastProduct
   writingAssessments?: PodcastWritingAssessment[]
   writingAssignments?: Array<{ title: string; focus: string; status: string }>
+  literacyAttempts?: SkillAttempt[]
 }) {
-  const brandName = product === 'writia' ? 'Writia' : 'Speakia'
-  const topics = product === 'writia' ? writiaPodcastTopics : podcastTopics
+  const brandName = product === 'writia' ? 'Writia' : product === 'readia' ? 'Readia' : product === 'listenia' ? 'Listenia' : 'Speakia'
+  const topics = product === 'writia' ? writiaPodcastTopics : product === 'readia' ? readiaPodcastTopics : product === 'listenia' ? listeniaPodcastTopics : podcastTopics
   const [podcasts, setPodcasts] = useState(() => loadPodcasts(username, product))
   const [selectedId, setSelectedId] = useState<string | null>(() => loadPodcasts(username, product)[0]?.id ?? null)
   const [topic, setTopic] = useState(topics[0])
@@ -555,7 +574,14 @@ export function PodcastsPage({
           learner: { writingTargetBand: profile.writingTargetBand || null, writingTestDate: profile.writingTestDate || null, writingStudyGoal: profile.writingStudyGoal || null },
           recentWritingAssessments: writingAssessments.slice(0, 5).map(({ taskLabel, overallBand, summary, priority, criteria }) => ({ taskLabel, overallBand, summary, priority, criteria })),
         })
-        : JSON.stringify({ recentSpeakingAssessments: results.slice(0, 5).map(({ title, overallBand, nextSteps }) => ({ title, overallBand, nextSteps })) })
+        : product === 'readia' || product === 'listenia'
+          ? JSON.stringify({
+            learner: product === 'readia'
+              ? { readingTargetBand: profile.readingTargetBand || null, readingTestDate: profile.readingTestDate || null, readingStudyGoal: profile.readingStudyGoal || null }
+              : { listeningTargetBand: profile.listeningTargetBand || null, listeningTestDate: profile.listeningTestDate || null, listeningStudyGoal: profile.listeningStudyGoal || null },
+            recentPracticeAttempts: literacyAttempts.slice(0, 8).map(({ title, score, total, questionTypeScores, mode }) => ({ title, score, total, questionTypeScores, mode })),
+          })
+          : JSON.stringify({ recentSpeakingAssessments: results.slice(0, 5).map(({ title, overallBand, nextSteps }) => ({ title, overallBand, nextSteps })) })
       await livePodcast.start(normalizedTopic, language, liveEpisode.id, apiKey, selectedHosts, product, liveLearnerContext, turnCount)
       return
     }
@@ -577,7 +603,20 @@ export function PodcastsPage({
           selectedHosts,
           turnCount,
         )
-        : await generateSpeakiaPodcast(
+        : product === 'readia' || product === 'listenia'
+          ? await generateLiteracyPodcast(
+            apiKey,
+            selectedTopic,
+            product,
+            { profile, attempts: literacyAttempts },
+            scriptModel,
+            speechModel,
+            language,
+            streaming,
+            selectedHosts,
+            turnCount,
+          )
+          : await generateSpeakiaPodcast(
           apiKey,
           selectedTopic,
           { profile, results, lexicalEntries, assignments, coachActivity: readCoachActivity() },
@@ -663,7 +702,11 @@ export function PodcastsPage({
           <h1>{brandName} Podcasts</h1>
           <p className="page-subtitle">{product === 'writia'
             ? 'Personalized audio lessons turn your writing evidence and goals into a practical coaching conversation and improvement plan.'
-            : 'Two AI co-hosts turn your learning progress and IELTS goals into a helpful, listenable conversation.'}</p>
+            : product === 'readia'
+              ? 'Two co-hosts turn your Reading goals and practice evidence into replayable, passage-strategy coaching.'
+              : product === 'listenia'
+                ? 'Two co-hosts turn your Listening goals and practice evidence into replayable, listening-strategy coaching.'
+                : 'Two AI co-hosts turn your learning progress and IELTS goals into a helpful, listenable conversation.'}</p>
         </div>
         <div className="podcast-heading-stat"><Headphones size={17} /><strong>{podcasts.length}</strong><span>episodes saved</span></div>
       </div>
@@ -813,6 +856,7 @@ export function PodcastsPage({
             {!apiKey.trim() && <p className="podcast-form-hint">Add your shared AI key in Settings to create a personalized episode.</p>}
             {product === 'writia' && writingAssessments.length === 0 && <p className="podcast-form-hint">No saved writing assessments yet. Your first episode will focus on your writing goals, useful Writia workflows, and general IELTS Writing guidance.</p>}
             {product === 'speakia' && results.length === 0 && <p className="podcast-form-hint">No saved practice assessments yet. Your first episode will focus on Speakia resources and general IELTS guidance.</p>}
+            {(product === 'readia' || product === 'listenia') && literacyAttempts.length === 0 && <p className="podcast-form-hint">No completed {product === 'readia' ? 'Reading' : 'Listening'} attempts yet. The first episode will focus on your saved goals and general skill strategies rather than a performance diagnosis.</p>}
           </form>
           </div>
         </details>

@@ -4,9 +4,22 @@ import type { EmbeddedLearningModule } from './learningModules'
 import type { InteractiveLesson } from './interactiveLesson'
 import { isInfographic, type Infographic } from './infographic'
 
-const conversationKeys = (platform: 'speaking' | 'writing') => platform === 'writing'
+export type CoachAssetPlatform = 'speaking' | 'writing' | 'reading' | 'listening'
+
+function coachName(platform: CoachAssetPlatform): string {
+  if (platform === 'writing') return 'Writia Assistant'
+  if (platform === 'reading') return 'Readia Assistant'
+  if (platform === 'listening') return 'Listenia Assistant'
+  return 'Speakia Coach'
+}
+
+const conversationKeys = (platform: CoachAssetPlatform) => platform === 'writing'
   ? { legacy: 'writia-assistant-conversation-v1', sessions: 'writia-assistant-sessions-v1' }
-  : { legacy: 'speakia-coach-conversation-v1', sessions: 'speakia-coach-sessions-v1' }
+  : platform === 'reading'
+    ? { legacy: 'readia-assistant-conversation-v1', sessions: 'readia-assistant-sessions-v1' }
+    : platform === 'listening'
+      ? { legacy: 'listenia-assistant-conversation-v1', sessions: 'listenia-assistant-sessions-v1' }
+      : { legacy: 'speakia-coach-conversation-v1', sessions: 'speakia-coach-sessions-v1' }
 export const coachAssetsUpdatedEvent = 'speakia:coach-assets-updated'
 
 export type CoachAsset =
@@ -119,7 +132,7 @@ function assetFromMessage(message: unknown): CoachAsset | undefined {
   return undefined
 }
 
-export function loadCoachAssets(platform: 'speaking' | 'writing' = 'speaking'): CoachAsset[] {
+export function loadCoachAssets(platform: CoachAssetPlatform = 'speaking'): CoachAsset[] {
   const keys = conversationKeys(platform)
   const assets = new Map<string, CoachAsset>()
   const addMessages = (messages: unknown[]) => {
@@ -133,7 +146,7 @@ export function loadCoachAssets(platform: 'speaking' | 'writing' = 'speaking'): 
     if (storedSessions) {
       const parsed: unknown = JSON.parse(storedSessions)
       if (!isRecord(parsed) || !Array.isArray(parsed.conversations)) {
-        throw new Error(`Saved ${platform === 'writing' ? 'Writia assistant' : 'Speakia coach'} sessions are not in a supported format.`)
+        throw new Error(`Saved ${coachName(platform)} sessions are not in a supported format.`)
       }
       const conversations = parsed.conversations.filter((conversation): conversation is Record<string, unknown> => (
         isRecord(conversation) && Array.isArray(conversation.messages)
@@ -141,22 +154,22 @@ export function loadCoachAssets(platform: 'speaking' | 'writing' = 'speaking'): 
       conversations.forEach((conversation) => addMessages(conversation.messages as unknown[]))
     }
   } catch (error) {
-    console.error(`Unable to load ${platform === 'writing' ? 'Writia Assistant' : 'Speakia Coach'} session assets.`, error)
+    console.error(`Unable to load ${coachName(platform)} session assets.`, error)
   }
   try {
     const storedConversation = localStorage.getItem(keys.legacy)
     if (storedConversation) {
       const parsed: unknown = JSON.parse(storedConversation)
-      if (!Array.isArray(parsed)) throw new Error(`Saved ${platform === 'writing' ? 'Writia Assistant' : 'Speakia Coach'} conversation is not a list.`)
+      if (!Array.isArray(parsed)) throw new Error(`Saved ${coachName(platform)} conversation is not a list.`)
       addMessages(parsed)
     }
   } catch (error) {
-    console.error(`Unable to load legacy ${platform === 'writing' ? 'Writia Assistant' : 'Speakia Coach'} assets.`, error)
+    console.error(`Unable to load legacy ${coachName(platform)} assets.`, error)
   }
   return [...assets.values()]
 }
 
-export function saveCoachAssetInteraction(assetId: string, interaction: string, platform: 'speaking' | 'writing' = 'speaking'): void {
+export function saveCoachAssetInteraction(assetId: string, interaction: string, platform: CoachAssetPlatform = 'speaking'): void {
   const keys = conversationKeys(platform)
   let storedSessions: unknown
   let storedConversation: unknown
@@ -166,7 +179,7 @@ export function saveCoachAssetInteraction(assetId: string, interaction: string, 
     storedSessions = sessionsRaw ? JSON.parse(sessionsRaw) : null
     storedConversation = conversationRaw ? JSON.parse(conversationRaw) : null
   } catch (error) {
-    console.error(`Unable to read saved ${platform === 'writing' ? 'Writia Assistant' : 'Speakia Coach'} sessions while saving asset progress.`, error)
+    console.error(`Unable to read saved ${coachName(platform)} sessions while saving asset progress.`, error)
     throw new Error('This asset’s progress could not be saved.')
   }
 
@@ -213,7 +226,7 @@ export function saveCoachAssetInteraction(assetId: string, interaction: string, 
     if (nextConversation) localStorage.setItem(keys.legacy, JSON.stringify(nextConversation))
     window.dispatchEvent(new Event(coachAssetsUpdatedEvent))
   } catch (error) {
-    console.error(`Unable to save ${platform === 'writing' ? 'Writia Assistant' : 'Speakia Coach'} asset progress.`, error)
+    console.error(`Unable to save ${coachName(platform)} asset progress.`, error)
     throw new Error('This asset’s progress could not be saved on this device.')
   }
 }

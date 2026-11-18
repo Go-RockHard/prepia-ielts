@@ -55,10 +55,10 @@ const colorOptions = ['violet', 'coral', 'mint', 'blue', 'gold', 'peach', 'rose'
 const defaultSlides: FeatureSlide[] = [
   {
     id: 'prodia-introduction',
-    title: 'One IELTS journey. Two skills, built to grow.',
-    subtitle: 'Meet Prodia: your dedicated home for productive skills.',
-    definition: 'Prodia brings together two purpose-built AI coaching platforms: Speakia for IELTS Speaking and Writia for IELTS Writing. Each platform has its own focused tools and learner profile, connected in one learning ecosystem.',
-    keyPoints: ['Practise speaking with Speakia', 'Plan, write, and improve with Writia', 'Build both productive skills in one Prodia ecosystem'],
+    title: 'One IELTS journey. Four skills, built to grow.',
+    subtitle: 'Meet Prepia IELTS: your connected home for all four IELTS skills.',
+    definition: 'Prepia brings together four purpose-built AI coaching workspaces: Speakia for Speaking, Writia for Writing, Readia for Reading, and Listenia for Listening. Each has focused practice and guidance, connected in one learning journey.',
+    keyPoints: ['Practise speaking with Speakia and writing with Writia', 'Build reading strategies with Readia', 'Train listening skills with Listenia'],
     icon: 'dashboard',
     color: 'violet',
   },
@@ -183,7 +183,7 @@ const defaultSlides: FeatureSlide[] = [
     id: 'writia',
     title: 'Build confidence in IELTS writing',
     subtitle: 'Plan, draft, and improve with Writia.',
-    definition: 'Writia is Prodia’s dedicated IELTS Writing platform for Academic and General Training, with structured tasks, adaptive coaching, and criterion-based feedback.',
+    definition: 'Writia is Prepia’s dedicated IELTS Writing platform for Academic and General Training, with structured tasks, adaptive coaching, and criterion-based feedback.',
     keyPoints: ['Practise IELTS writing tasks and organize your response', 'Review feedback and suggestions as you revise', 'Track writing progress in a dedicated learner profile'],
     icon: 'writing',
     color: 'coral',
@@ -210,7 +210,7 @@ const defaultSlides: FeatureSlide[] = [
     id: 'writia-coach',
     title: 'Meet Writia Coach',
     subtitle: 'Writing-aware help, right where you need it.',
-    definition: 'Writia Coach supports writing tasks with in-context guidance and shares Prodia-wide learning tools, while keeping its coaching grounded in the Writia writing experience.',
+    definition: 'Writia Coach supports writing tasks with in-context guidance and shares Prepia-wide learning tools, while keeping its coaching grounded in the Writia writing experience.',
     keyPoints: ['Ask about your prompt, ideas, structure, or draft', 'Share a written task snapshot to discuss or assess your work', 'Create learning materials and revisit them in Writia Coach Assets'],
     icon: 'coach',
     color: 'indigo',
@@ -232,6 +232,24 @@ const defaultSlides: FeatureSlide[] = [
     keyPoints: ['Review past writing practice and assessment feedback', 'Use band descriptors to understand IELTS writing criteria', 'Start with placement assessment and set a focused learning direction'],
     icon: 'flashcards',
     color: 'gold',
+  },
+  {
+    id: 'readia-reading',
+    title: 'Read with evidence and strategy',
+    subtitle: 'Meet Readia, your dedicated IELTS Reading workspace.',
+    definition: 'Readia brings together original IELTS-style passages, varied question formats, timed practice, progress tracking, and optional live guidance to help learners read strategically.',
+    keyPoints: ['Practise focused reading tasks or a 40-question, 60-minute mock', 'Build evidence-finding and paraphrase awareness', 'Review answers and track practice progress'],
+    icon: 'book',
+    color: 'violet',
+  },
+  {
+    id: 'listenia-listening',
+    title: 'Listen closely and catch the detail',
+    subtitle: 'Meet Listenia, your dedicated IELTS Listening workspace.',
+    definition: 'Listenia offers original IELTS-style listening tasks, four-section practice, timed simulations, answer review, progress tracking, and optional live strategy support. Prototype recordings use browser-generated speech, not official IELTS audio.',
+    keyPoints: ['Practise focused tasks or a 40-question, 30-minute mock', 'Listen to four sections and review the transcript after submission', 'Use live guidance to develop listening strategies'],
+    icon: 'media',
+    color: 'blue',
   },
 ]
 
@@ -300,7 +318,7 @@ function loadSlides(): { slides: FeatureSlide[]; error: string } {
 function newSlide(): FeatureSlide {
   return {
     id: crypto.randomUUID(),
-    title: 'A new Prodia feature',
+    title: 'A new Prepia feature',
     subtitle: 'Add a compelling subcaption',
     definition: 'Describe what this feature makes possible for learners.',
     keyPoints: ['Add a key point', 'Show the learner benefit', 'Connect the feature to progress'],
@@ -451,9 +469,9 @@ export function FeatureTour() {
     }
   }
 
-  return <section ref={tourRef} className={`feature-tour ${editing ? 'feature-tour-editing' : ''}`} aria-label="Discover Prodia's Speakia and Writia ecosystem">
+  return <section ref={tourRef} className={`feature-tour ${editing ? 'feature-tour-editing' : ''}`} aria-label="Discover the Prepia IELTS learning platform">
     <div className="feature-tour-topline">
-      <span><Sparkles size={14} /> PRODIA · FEATURE STORY</span>
+      <span><Sparkles size={14} /> PREPIA IELTS · FEATURE TOUR</span>
       <div className="feature-tour-tools">
         <label className="feature-tour-search"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Find a slide…" aria-label="Search slides by text" /><span>{search ? `${searchResults.length} found` : `${slides.length} slides`}</span></label>
         {search.trim() && <div className="feature-tour-search-results" role="listbox" aria-label="Matching slides">

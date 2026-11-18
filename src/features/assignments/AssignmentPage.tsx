@@ -9,10 +9,15 @@ import type { AssignmentEvaluationModel, AssignmentPerformanceReport, CoachAssig
 
 const evaluationModelKey = 'speakia-assignment-evaluation-model-v1'
 
+function isAssignmentEvaluationModel(value: string): value is AssignmentEvaluationModel {
+  return value === 'gemini-3.8-flash' || value === 'gemini-3.1-pro-preview'
+    || value === 'gemini-3.5-flash-lite' || value === 'gemini-3.1-flash-lite'
+}
+
 function loadEvaluationModel(): AssignmentEvaluationModel {
   try {
     const stored = localStorage.getItem(evaluationModelKey)
-    return ASSISTANT_MODELS.find((item) => item.id === stored)?.id ?? 'gemini-3.8-flash'
+    return stored && isAssignmentEvaluationModel(stored) ? stored : 'gemini-3.8-flash'
   } catch (error) {
     console.error('Unable to load the assignment evaluation model preference.', error)
     return 'gemini-3.8-flash'
@@ -49,11 +54,10 @@ export function AssignmentPage({
   const [expandedHistoryId, setExpandedHistoryId] = useState<string | null | undefined>(undefined)
   const [evaluationModel, setEvaluationModel] = useState<AssignmentEvaluationModel>(loadEvaluationModel)
   function changeEvaluationModel(value: string) {
-    const model = ASSISTANT_MODELS.find((item) => item.id === value)
-    if (!model) return
-    setEvaluationModel(model.id)
+    if (!isAssignmentEvaluationModel(value)) return
+    setEvaluationModel(value)
     try {
-      localStorage.setItem(evaluationModelKey, model.id)
+      localStorage.setItem(evaluationModelKey, value)
     } catch (error) {
       console.error('Unable to save the assignment evaluation model preference.', error)
       setPageError('The selected evaluation model is active, but could not be saved on this device.')
@@ -224,7 +228,7 @@ function AssignmentSubmission({
   return <section className="assignment-submission" aria-labelledby={`assignment-submit-${assignment.id}`}>
     <div className="assignment-submission-heading">
       <div><span className="section-kicker">{assignment.report ? 'SUBMIT ANOTHER ATTEMPT' : 'YOUR WORKSPACE'}</span><h4 id={`assignment-submit-${assignment.id}`}>{assignment.mode === 'handwritten' ? 'Submit your written work' : 'Submit your speaking practice'}</h4><p>{assignment.mode === 'handwritten' ? 'Upload a clear photo or PDF of your handwritten work, or paste your response.' : 'Upload your recording for multimodal speaking feedback, or paste a transcript for language-focused feedback.'}</p></div>
-      <label className="assignment-model-picker">ASSESSMENT MODEL<select value={model} onChange={(event) => onModelChange(event.target.value)} disabled={busy}>{ASSISTANT_MODELS.map((item) => <option key={item.id} value={item.id}>{item.label} · {item.description}</option>)}</select></label>
+      <label className="assignment-model-picker">ASSESSMENT MODEL<select value={model} onChange={(event) => onModelChange(event.target.value)} disabled={busy}>{ASSISTANT_MODELS.filter((item) => isAssignmentEvaluationModel(item.id)).map((item) => <option key={item.id} value={item.id}>{item.label} · {item.description}</option>)}</select></label>
     </div>
     <form className="assignment-submission-form" onSubmit={(event) => void submit(event)}>
       <label className="assignment-file-picker"><Upload size={17} /><span>{file ? file.name : assignment.mode === 'handwritten' ? 'Choose a photo or PDF' : 'Choose an audio recording'}</span><small>{assignment.mode === 'handwritten' ? 'JPG, PNG, WebP, HEIC or PDF · up to 50 MB' : 'MP3, WAV, M4A, OGG, AAC, FLAC or WebM · up to 50 MB'}</small><input type="file" accept={assignment.mode === 'handwritten' ? 'image/*,.pdf' : 'audio/*'} onChange={(event) => { setFile(event.target.files?.[0] ?? null); setError('') }} /></label>
@@ -239,7 +243,7 @@ function AssignmentSubmission({
 
 function AssignmentReport({ report }: { report: AssignmentPerformanceReport }) {
   return <section className="assignment-performance-report" aria-label="Assignment performance report">
-    <div className="assignment-report-heading"><div><span className="section-kicker">AI PERFORMANCE REPORT</span><h4>Submission review</h4><p>{report.submissionName} · {new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(report.evaluatedAt))} · {ASSISTANT_MODELS.find((item) => item.id === report.model)?.label ?? 'Prodia assessment model'}</p></div><Badge><CheckCircle2 size={12} /> Evaluated</Badge></div>
+    <div className="assignment-report-heading"><div><span className="section-kicker">AI PERFORMANCE REPORT</span><h4>Submission review</h4><p>{report.submissionName} · {new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(report.evaluatedAt))} · {ASSISTANT_MODELS.find((item) => item.id === report.model)?.label ?? 'Prepia assessment model'}</p></div><Badge><CheckCircle2 size={12} /> Evaluated</Badge></div>
     <p className="assignment-report-summary">{report.summary}</p>
     <div className="assignment-report-grid">
       <div className="assignment-report-panel"><h5><CheckCircle2 size={14} /> Strengths</h5><ul>{report.strengths.map((item, index) => <li key={`${index}-${item}`}>{item}</li>)}</ul></div>

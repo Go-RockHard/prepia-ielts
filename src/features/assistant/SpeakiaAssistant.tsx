@@ -42,6 +42,7 @@ import { writaNavItems, type WritaModuleId } from '@/features/writing/navigation
 import { loadMediaAssessments } from '@/features/mediaAssessments/storage'
 import { normalizeYouTubeUrl } from '@/features/mediaAssessments/assessment'
 import type { CoachAssignment } from '@/features/assignments/types'
+import type { PracticeSet } from '@/features/skills/questionTypes'
 import type { AssistantModel } from './models'
 import { ASSISTANT_MODELS, DEFAULT_GEMINI_LIVE_VOICE, GEMINI_LIVE_VOICES, type GeminiLiveVoice } from './models'
 import { UrduTranslator, type TranslationMode } from './UrduTranslator'
@@ -70,6 +71,15 @@ function orderTranscriptAudioTurns(turns: TranscriptEntry[]): TranscriptEntry[] 
   return turns.map((turn, index) => ({ turn, index }))
     .sort((left, right) => left.turn.audioOrder! - right.turn.audioOrder! || left.index - right.index)
     .map(({ turn }) => turn)
+}
+type AssistantPlatform = 'speaking' | 'writing' | 'reading' | 'listening'
+type LiteracyAssistantContext = {
+  product: 'readia' | 'listenia'
+  currentView: string
+  testType: 'Academic' | 'General Training'
+  targetBand?: string
+  studyGoal?: string
+  practiceSet?: PracticeSet
 }
 type AssistantSection = 'Dashboard' | 'Learner Profile' | 'Vocabulary Studio' | 'Learning Library' | 'Topic Bank' | 'Vocabulary Bank' | 'Vocabulary Upgrade' | 'Smart lesson' | 'Speakia Coach Assets' | 'Assignments' | 'Speakia Flashcards' | 'Practice' | 'Speaking Drills' | 'Guided Practice' | 'Writia' | 'AI-to-AI Simulation' | 'Answer Builder' | 'Performance History' | 'Media assessments' | 'Speakia Podcasts' | 'Band Descriptors' | 'Placement Assessment' | 'Lexical Vault' | 'Profile' | 'Settings'
 const assistantSections: AssistantSection[] = ['Dashboard', 'Learner Profile', 'Vocabulary Studio', 'Learning Library', 'Topic Bank', 'Vocabulary Bank', 'Vocabulary Upgrade', 'Smart lesson', 'Speakia Coach Assets', 'Assignments', 'Speakia Flashcards', 'Practice', 'Speaking Drills', 'Guided Practice', 'Writia', 'AI-to-AI Simulation', 'Answer Builder', 'Performance History', 'Media assessments', 'Speakia Podcasts', 'Band Descriptors', 'Placement Assessment', 'Lexical Vault', 'Profile', 'Settings']
@@ -100,6 +110,27 @@ const writingLiveFlashcardsTool = withToolDescription(liveFlashcardsTool, 'Creat
 const writingLiveSlidesTool = withToolDescription(liveSlidesTool, 'Create and return a complete IELTS Writing slide deck with progressive teaching and writing practice.')
 const writingAdaptiveQuizTool = withToolDescription(adaptiveQuizTool, 'Create an adaptive interactive quiz to check the learner’s IELTS Writing knowledge and skills.')
 const writingLiveAdaptiveQuizTool = withToolDescription(liveAdaptiveQuizTool, 'Create and return an adaptive interactive quiz with questions about IELTS Writing skills.')
+const receptiveTools = (product: 'readia' | 'listenia') => {
+  const skill = product === 'readia' ? 'Reading' : 'Listening'
+  return {
+    live: [
+      navigateLearningModuleTool,
+      withToolDescription(audioLessonTool, `Create a spoken IELTS ${skill} lesson that teaches a practical test strategy, using the active practice set when relevant.`),
+      withToolDescription(interactiveLessonTool, `Build an interactive IELTS ${skill} practice activity. Use the current passage or listening transcript, question types, and answer evidence when relevant.`),
+      withToolDescription(liveFlashcardsTool, `Create interactive IELTS ${skill} flashcards for strategies, vocabulary, paraphrases, distractors, or the current practice material.`),
+      withToolDescription(liveSlidesTool, `Create an interactive IELTS ${skill} slide deck with a focused strategy lesson and active practice.`),
+      withToolDescription(liveAdaptiveQuizTool, `Create an adaptive interactive IELTS ${skill} quiz. Ground questions in the active passage or listening transcript when appropriate, and explain answers with source evidence.`),
+    ],
+    text: [
+      navigateLearningModuleTool,
+      withToolDescription(audioLessonTool, `Create a spoken IELTS ${skill} lesson that teaches a practical test strategy, using the active practice set when relevant.`),
+      withToolDescription(interactiveLessonTool, `Build an interactive IELTS ${skill} practice activity. Use the current passage or listening transcript, question types, and answer evidence when relevant.`),
+      withToolDescription(flashcardsTool, `Create interactive IELTS ${skill} flashcards for strategies, vocabulary, paraphrases, distractors, or the current practice material.`),
+      withToolDescription(slidesTool, `Create an interactive IELTS ${skill} slide deck with a focused strategy lesson and active practice.`),
+      withToolDescription(adaptiveQuizTool, `Create an adaptive interactive IELTS ${skill} quiz. Ground questions in the active passage or listening transcript when appropriate, and explain answers with source evidence.`),
+    ],
+  }
+}
 export interface CoachLaunchRequest {
   id: string
   kind: 'lexical' | 'topic'
@@ -397,12 +428,39 @@ const initialMessage: Omit<ChatMessage, 'id'> = {
 }
 const quickPrompts = ['How can I improve my fluency?', 'Open the Speaking Drills page', 'Summarise my recent progress', 'Create IELTS speaking flashcards', 'Build me an interactive IELTS lesson', 'Quiz me on IELTS Speaking']
 const writingQuickPrompts = ['Review my latest writing strengths and next steps', 'Open Writing Drills', 'Start a Writing Test Simulation', 'Create writing flashcards', 'Build an interactive writing lesson', 'Create an audio lesson for IELTS Writing']
+const readingQuickPrompts = ['Help me find evidence for a question', 'Teach me how to spot paraphrases', 'Create Reading strategy flashcards', 'Build a passage-based quiz']
+const listeningQuickPrompts = ['Help me identify the speaker’s key point', 'Explain a listening distractor', 'Create Listening strategy flashcards', 'Build a transcript-based quiz']
 const conversationStorageKey = 'speakia-coach-conversation-v1'
 const conversationSessionsStorageKey = 'speakia-coach-sessions-v1'
 const coachTranscriptStorageId = 'speakia-coach-conversation'
-const conversationKeys = (platform: 'speaking' | 'writing') => platform === 'writing'
+const conversationKeys = (platform: AssistantPlatform) => platform === 'writing'
   ? { legacy: 'writia-assistant-conversation-v1', sessions: 'writia-assistant-sessions-v1', audio: 'writia-assistant-conversation' }
-  : { legacy: conversationStorageKey, sessions: conversationSessionsStorageKey, audio: coachTranscriptStorageId }
+  : platform === 'reading'
+    ? { legacy: 'readia-assistant-conversation-v1', sessions: 'readia-assistant-sessions-v1', audio: 'readia-assistant-conversation' }
+    : platform === 'listening'
+      ? { legacy: 'listenia-assistant-conversation-v1', sessions: 'listenia-assistant-sessions-v1', audio: 'listenia-assistant-conversation' }
+      : { legacy: conversationStorageKey, sessions: conversationSessionsStorageKey, audio: coachTranscriptStorageId }
+const assistantNameFor = (platform: AssistantPlatform) => platform === 'writing'
+  ? 'Writia Assistant'
+  : platform === 'reading'
+    ? 'Readia Assistant'
+    : platform === 'listening'
+      ? 'Listenia Assistant'
+      : 'Speakia Coach'
+const assistantBrandFor = (platform: AssistantPlatform) => platform === 'writing'
+  ? 'Writia IELTS'
+  : platform === 'reading'
+    ? 'Readia IELTS'
+    : platform === 'listening'
+      ? 'Listenia IELTS'
+      : 'Speakia IELTS'
+const assistantSkillFor = (platform: AssistantPlatform) => platform === 'writing'
+  ? 'writing'
+  : platform === 'reading'
+    ? 'reading'
+    : platform === 'listening'
+      ? 'listening'
+      : 'speaking'
 const coachVoiceStorageKey = 'speakia-coach-live-voice-v1'
 const coachLanguageStorageKey = 'speakia-coach-language-v1'
 const coachFollowUpsStorageKey = 'speakia-coach-follow-ups-v1'
@@ -574,7 +632,7 @@ function isPracticeStartControl(section: AssistantSection, control: string, then
   return /\b(?:connect to live examiner|start|i.?m ready)\b/i.test(`${control} ${thenControl ?? ''}`)
 }
 
-function requestedLearningTool(text: string, platform: 'speaking' | 'writing' = 'speaking'): string | undefined {
+function requestedLearningTool(text: string, platform: AssistantPlatform = 'speaking'): string | undefined {
   if (platform === 'writing' && /\b(?:start|begin|launch|take|run)\b.{0,60}\b(?:ielts\s+)?writing\s+(?:test|exam|simulation)\b|\b(?:start|begin|launch|take|run)\b.{0,40}\bwriting\s+drills?\b/i.test(text)) {
     return /\bdrills?\b/i.test(text) ? writiaNavigationTool.name : startWritingExamTool.name
   }
@@ -698,11 +756,11 @@ function summarizeModuleContent(module: LearningModule): string | EmbeddedLearni
     .slice(0, 5000)
 }
 
-function loadConversation(platform: 'speaking' | 'writing'): ChatMessage[] {
+function loadConversation(platform: AssistantPlatform): ChatMessage[] {
   const keys = conversationKeys(platform)
-  const welcome = platform === 'writing'
-    ? 'Hi! I’m your Writia Assistant. I can coach your writing, open any Writia module, and help you practise with live voice or learning tools.'
-    : initialMessage.text
+  const welcome = platform === 'speaking'
+    ? initialMessage.text
+    : `Hi! I’m your ${assistantNameFor(platform)}. I can coach your IELTS ${assistantSkillFor(platform)} practice and create interactive learning activities.`
   try {
     const stored = localStorage.getItem(keys.legacy)
     if (!stored) return [createMessage(initialMessage.role, welcome)]
@@ -710,7 +768,7 @@ function loadConversation(platform: 'speaking' | 'writing'): ChatMessage[] {
     if (!Array.isArray(parsed) || !parsed.every(isStoredCoachMessage)) throw new Error('Saved Speakia coach conversation is invalid.')
     return parsed as ChatMessage[]
   } catch (error) {
-    console.error(`Unable to load the ${platform === 'writing' ? 'Writia assistant' : 'Speakia coach'} conversation.`, error)
+    console.error(`Unable to load the ${assistantNameFor(platform)} conversation.`, error)
     return [createMessage(initialMessage.role, welcome)]
   }
 }
@@ -732,19 +790,19 @@ function isStoredCoachMessage(item: unknown): item is ChatMessage {
 }
 
   function createConversation(
-    platform: 'speaking' | 'writing',
+    platform: AssistantPlatform,
     messages?: ChatMessage[],
     audioStorageId?: string,
   ): CoachConversation {
     const id = crypto.randomUUID()
     const now = new Date().toISOString()
-    const defaultText = platform === 'writing'
-      ? 'Hi! I’m your Writia Assistant. I can coach your writing, open any Writia module, and help you practise with live voice or learning tools.'
-      : initialMessage.text
+    const defaultText = platform === 'speaking'
+      ? initialMessage.text
+      : `Hi! I’m your ${assistantNameFor(platform)}. I can coach your IELTS ${assistantSkillFor(platform)} practice and create interactive learning activities.`
     return { id, title: 'New conversation', createdAt: now, updatedAt: now, audioStorageId: audioStorageId ?? `${conversationKeys(platform).audio}-${id}`, messages: messages ?? [createMessage(initialMessage.role, defaultText)], toolEvents: [] }
   }
 
-function loadConversationStore(platform: 'speaking' | 'writing'): CoachConversationStore {
+function loadConversationStore(platform: AssistantPlatform): CoachConversationStore {
     const keys = conversationKeys(platform)
     try {
       const stored = localStorage.getItem(keys.sessions)
@@ -781,7 +839,7 @@ function loadConversationStore(platform: 'speaking' | 'writing'): CoachConversat
       const conversation = createConversation(platform, legacy ? loadConversation(platform) : undefined, legacy ? keys.audio : undefined)
       return { version: 1, activeConversationId: conversation.id, conversations: [conversation] }
     } catch (error) {
-      console.error(`Unable to load saved ${platform === 'writing' ? 'Writia assistant' : 'Speakia coach'} sessions.`, error)
+      console.error(`Unable to load saved ${assistantNameFor(platform)} sessions.`, error)
       const conversation = createConversation(platform, loadConversation(platform), conversationKeys(platform).audio)
       return { version: 1, activeConversationId: conversation.id, conversations: [conversation] }
     }
@@ -900,6 +958,7 @@ function formatToolEvents(calls: FunctionCall[], responses: FunctionResponse[]):
   lexicalEntries: LexicalEntry[],
   profile: UserProfile,
   writingContext: WritiaLearnerContext,
+  literacyContext: LiteracyAssistantContext | undefined,
   mediaAssessments: ReturnType<typeof loadMediaAssessments>,
   assignments: CoachAssignment[],
   messages: ChatMessage[],
@@ -915,6 +974,12 @@ function formatToolEvents(calls: FunctionCall[], responses: FunctionResponse[]):
       writingTestDate: profile.writingTestDate || null,
       speakingStudyGoal: profile.speakingStudyGoal || profile.studyGoal || null,
       writingStudyGoal: profile.writingStudyGoal || null,
+      readingTargetBand: profile.readingTargetBand || null,
+      readingTestDate: profile.readingTestDate || null,
+      readingStudyGoal: profile.readingStudyGoal || null,
+      listeningTargetBand: profile.listeningTargetBand || null,
+      listeningTestDate: profile.listeningTestDate || null,
+      listeningStudyGoal: profile.listeningStudyGoal || null,
       firstLanguage: profile.firstLanguage || null,
       speakingPlacementBaseline: profile.speakingPlacementAssessment ? {
         overallBand: profile.speakingPlacementAssessment.overallBand,
@@ -931,6 +996,14 @@ function formatToolEvents(calls: FunctionCall[], responses: FunctionResponse[]):
         criteria: profile.writingPlacementAssessment.criteria.map(({ label, band, evidence, nextStep }) => ({ label, band, evidence, nextStep })),
       } : null,
     },
+    literacyPractice: literacyContext ? {
+      product: literacyContext.product,
+      currentView: literacyContext.currentView,
+      testType: literacyContext.testType,
+      targetBand: literacyContext.targetBand ?? null,
+      studyGoal: literacyContext.studyGoal ?? null,
+      practiceSet: literacyContext.practiceSet ?? null,
+    } : null,
     availablePerformanceTests: results.map((result) => ({
       id: result.id,
       title: result.title,
@@ -1057,6 +1130,24 @@ LEARNING TOOLS: Use the interactive HTML5 lesson, flashcards, slides, adaptive q
 Current learner and saved app data (JSON):\n${JSON.stringify(context)}`
 }
 
+function createLiteracySystemInstruction(
+  context: ReturnType<typeof makeContext>,
+  platform: 'reading' | 'listening',
+  language: CoachLanguage,
+  persistentMemory = '',
+): string {
+  const skill = platform === 'reading' ? 'Reading' : 'Listening'
+  const product = platform === 'reading' ? 'Readia' : 'Listenia'
+  return `You are ${product} Assistant, an expert IELTS ${skill} coach inside Prepia. ${languageInstruction(language)}
+Learner profile and active ${skill.toLowerCase()} practice context:
+${JSON.stringify({ profile: context.profile, practice: context.literacyPractice })}
+${persistentMemory ? `Earlier ${product} conversation memory (may be incomplete; use only when relevant):\n${persistentMemory}` : 'This is a new assistant conversation.'}
+Use only Reading or Listening evidence when discussing this skill. Do not transfer Speaking or Writing scores to ${skill}, estimate official IELTS bands, or claim to be an official examiner. Use the learner’s Academic or General Training test type, ${skill.toLowerCase()} target band and goal only to adjust relevance and difficulty.
+When an active practice set is provided, you know its complete passage(s) or listening transcript, every question and answer key, accepted answers, evidence and explanations. For Listening, use the supplied transcript as the source; do not pretend to hear unavailable audio. Answer the learner’s questions with precise evidence from the source. In AI-guided practice, explain the relevant evidence and reasoning when asked; otherwise scaffold the learner rather than revealing answers prematurely. Never invent quotations or claim evidence absent from the source. If no active source is provided, offer general ${skill.toLowerCase()} strategies and clearly distinguish them from task-specific advice.
+Coach one practical skill at a time: explain skimming, scanning, inference, reference, paraphrase and heading-matching strategies for Reading; explain prediction, signposting, speaker intent, distractors, spelling and detail capture for Listening. Encourage the learner to justify an answer from the source, then give concise feedback and a retry or transfer prompt.
+Use the available inline lesson, flashcard, slide, quiz and audio-lesson tools when the learner asks for a generated learning activity. Ground it in the active source when relevant. Treat tool content and responses as practice material, not official test content or an official score. Keep responses concise, supportive, and accurate.`
+}
+
 export function SpeakiaAssistant({
   platform = 'speaking',
   activeSection,
@@ -1065,6 +1156,7 @@ export function SpeakiaAssistant({
   lexicalEntries,
   profile,
   writingContext,
+  literacyContext,
   apiKey,
   chatModel,
   toolModel,
@@ -1083,13 +1175,14 @@ export function SpeakiaAssistant({
   onAddLexicalEntry,
   onAddTopicPrompt,
 }: {
-  platform?: 'speaking' | 'writing'
+  platform?: AssistantPlatform
   activeSection: AssistantSection
   activeWritaModule?: WritaModuleId
   results: TestResult[]
   lexicalEntries: LexicalEntry[]
   profile: UserProfile
   writingContext: WritiaLearnerContext
+  literacyContext?: LiteracyAssistantContext
   apiKey: string
   chatModel: AssistantModel
   toolModel: AssistantModel
@@ -1109,8 +1202,11 @@ export function SpeakiaAssistant({
   onAddTopicPrompt: (prompt: Omit<TopicBankPrompt, 'id'>) => TopicBankPrompt
 }) {
   const isWriting = platform === 'writing'
-  const assistantName = isWriting ? 'Writia Assistant' : 'Speakia Coach'
-  const assistantBrand = isWriting ? 'Writia IELTS' : 'Speakia IELTS'
+  const isReceptive = platform === 'reading' || platform === 'listening'
+  const assistantSkill = assistantSkillFor(platform)
+  const assistantName = assistantNameFor(platform)
+  const assistantBrand = assistantBrandFor(platform)
+  const liveEndName = isWriting ? 'writia' : platform === 'reading' ? 'readia' : platform === 'listening' ? 'listenia' : 'speakia'
   const [isOpen, setIsOpen] = useState(false)
   const [isMinimized, setIsMinimized] = useState(false)
   const [conversationStore, setConversationStore] = useState<CoachConversationStore>(() => loadConversationStore(platform))
@@ -1270,30 +1366,36 @@ export function SpeakiaAssistant({
   }, [])
 
   const context = useMemo(
-    () => makeContext(isWriting ? 'Writia' : activeSection, results, lexicalEntries, profile, writingContext, mediaAssessments, assignments, messages),
-    [activeSection, assignments, isWriting, lexicalEntries, mediaAssessments, messages, profile, results, writingContext],
+    () => makeContext(isWriting ? 'Writia' : activeSection, results, lexicalEntries, profile, writingContext, literacyContext, mediaAssessments, assignments, messages),
+    [activeSection, assignments, isWriting, lexicalEntries, literacyContext, mediaAssessments, messages, profile, results, writingContext],
   )
   const persistentMemory = useMemo(
     () => buildPersistentMemory(conversationStore.conversations, activeConversationId),
     [activeConversationId, conversationStore.conversations],
   )
   const systemInstruction = useMemo(
-    () => isWriting
-      ? createWritingSystemInstruction(context, coachLanguage, persistentMemory, activeWritaModule)
-      : createSystemInstruction(context, coachLanguage, persistentMemory),
-    [activeWritaModule, coachLanguage, context, isWriting, persistentMemory],
+    () => isReceptive
+      ? createLiteracySystemInstruction(context, platform, coachLanguage, persistentMemory)
+      : isWriting
+        ? createWritingSystemInstruction(context, coachLanguage, persistentMemory, activeWritaModule)
+        : createSystemInstruction(context, coachLanguage, persistentMemory),
+    [activeWritaModule, coachLanguage, context, isReceptive, isWriting, persistentMemory, platform],
   )
   const activeToolDeclarations = useMemo(
-    () => isWriting
-      ? [writiaNavigationTool, startWritingExamTool, navigateLearningModuleTool, translatorTool, writingAudioLessonTool, writingInteractiveLessonTool, writingLiveFlashcardsTool, writingLiveSlidesTool, writingLiveAdaptiveQuizTool]
-      : [navigatePageTool, reviewPerformanceTestTool, startSpeakingTestTool, startGuidedPracticeTool, activatePageControlTool, navigateLearningModuleTool, translatorTool, audioLessonTool, interactiveLessonTool, liveFlashcardsTool, liveSlidesTool, liveAdaptiveQuizTool, addLexicalEntryTool, addTopicBankCardTool, infographicTool],
-    [isWriting],
+    () => isReceptive
+      ? receptiveTools(literacyContext?.product ?? (platform === 'reading' ? 'readia' : 'listenia')).live
+      : isWriting
+        ? [writiaNavigationTool, startWritingExamTool, navigateLearningModuleTool, translatorTool, writingAudioLessonTool, writingInteractiveLessonTool, writingLiveFlashcardsTool, writingLiveSlidesTool, writingLiveAdaptiveQuizTool]
+        : [navigatePageTool, reviewPerformanceTestTool, startSpeakingTestTool, startGuidedPracticeTool, activatePageControlTool, navigateLearningModuleTool, translatorTool, audioLessonTool, interactiveLessonTool, liveFlashcardsTool, liveSlidesTool, liveAdaptiveQuizTool, addLexicalEntryTool, addTopicBankCardTool, infographicTool],
+    [isReceptive, isWriting, literacyContext?.product, platform],
   )
   const activeTextToolDeclarations = useMemo(
-    () => isWriting
-      ? [writiaNavigationTool, startWritingExamTool, navigateLearningModuleTool, translatorTool, writingAudioLessonTool, writingInteractiveLessonTool, writingFlashcardsTool, writingSlidesTool, writingAdaptiveQuizTool]
-      : [navigatePageTool, reviewPerformanceTestTool, startSpeakingTestTool, startGuidedPracticeTool, activatePageControlTool, navigateLearningModuleTool, translatorTool, audioLessonTool, interactiveLessonTool, flashcardsTool, slidesTool, adaptiveQuizTool, addLexicalEntryTool, addTopicBankCardTool, infographicTool],
-    [isWriting],
+    () => isReceptive
+      ? receptiveTools(literacyContext?.product ?? (platform === 'reading' ? 'readia' : 'listenia')).text
+      : isWriting
+        ? [writiaNavigationTool, startWritingExamTool, navigateLearningModuleTool, translatorTool, writingAudioLessonTool, writingInteractiveLessonTool, writingFlashcardsTool, writingSlidesTool, writingAdaptiveQuizTool]
+        : [navigatePageTool, reviewPerformanceTestTool, startSpeakingTestTool, startGuidedPracticeTool, activatePageControlTool, navigateLearningModuleTool, translatorTool, audioLessonTool, interactiveLessonTool, flashcardsTool, slidesTool, adaptiveQuizTool, addLexicalEntryTool, addTopicBankCardTool, infographicTool],
+    [isReceptive, isWriting, literacyContext?.product, platform],
   )
   const usesExtendedThinking = Boolean(shadowingLaunch
     || coachFocus?.kind === 'lexical'
@@ -1320,16 +1422,19 @@ export function SpeakiaAssistant({
       : ''
     const audioInstructions = isWriting
       ? '\nMULTIMODAL AUDIO REVIEW: The learner may share audio. If it contains writing-related spoken notes or a dictated draft, help organize the ideas into a clear writing plan without pretending it is a submitted essay. If it contains a lesson or podcast, summarize useful writing takeaways.'
-      : '\nMULTIMODAL AUDIO REVIEW: The learner may stream an audio recording into this live conversation. Listen to the shared recording as supplied. If it contains an IELTS learner response, offer specific, evidence-based practice feedback on fluency and coherence, lexical resource, grammar, and pronunciation only where supported by the audio; do not assign an official score. If it is a podcast or simulated conversation, summarize the speakers and ideas and discuss IELTS-relevant takeaways. Ask what the learner would like to explore next.'
-    const closingInstructions = `\nCONVERSATION ENDING: Treat clear natural closing intent (including “that is all,” “I have what I need,” “I am done for now,” or a goodbye) as a request to end, even without the words stop or end. Respond with one brief, warm goodbye in the selected language, do not ask another question, then call end_${isWriting ? 'writia' : 'speakia'}_live_session. Do not end for an ambiguous “thanks” alone, and do not end when the learner says they want to continue, asks another question, or says not to stop.`
+      : isReceptive
+        ? `\nMULTIMODAL AUDIO REVIEW: For this ${assistantSkill} assistant, use audio shared by the learner as material for IELTS ${assistantSkill} practice only when appropriate. Distinguish shared audio from the active Listening transcript; never claim to hear audio that was not supplied. Give focused, evidence-based coaching and avoid official scores.`
+        : '\nMULTIMODAL AUDIO REVIEW: The learner may stream an audio recording into this live conversation. Listen to the shared recording as supplied. If it contains an IELTS learner response, offer specific, evidence-based practice feedback on fluency and coherence, lexical resource, grammar, and pronunciation only where supported by the audio; do not assign an official score. If it is a podcast or simulated conversation, summarize the speakers and ideas and discuss IELTS-relevant takeaways. Ask what the learner would like to explore next.'
+    const closingInstructions = `\nCONVERSATION ENDING: Treat clear natural closing intent (including “that is all,” “I have what I need,” “I am done for now,” or a goodbye) as a request to end, even without the words stop or end. Respond with one brief, warm goodbye in the selected language, do not ask another question, then call end_${liveEndName}_live_session. Do not end for an ambiguous “thanks” alone, and do not end when the learner says they want to continue, asks another question, or says not to stop.`
     return `${systemInstruction}${focusInstructions}${translatorInstructions}${shadowingInstructions}${audioInstructions}${closingInstructions}${reasoningInstructions}\n${languageInstruction(coachLanguage)}\nContinue the learner's existing ${assistantName} conversation when useful. Recent conversation for continuity (do not read it aloud):\n${recentConversation}`
-  }, [assistantName, coachFocus, coachLanguage, isWriting, messages, shadowingLaunch, systemInstruction, translatorMode, usesExtendedThinking])
+  }, [assistantName, assistantSkill, coachFocus, coachLanguage, isReceptive, isWriting, liveEndName, messages, shadowingLaunch, systemInstruction, translatorMode, usesExtendedThinking])
   const handleLiveCandidateTranscript = useCallback((text: string) => {
     if (isWriting) {
       if (/\b(?:start|begin|launch|take|run)\b.{0,50}\b(?:ielts\s+)?writing\s+(?:test|exam|simulation)\b|\b(?:start|begin|launch|take|run)\b.{0,35}\b(?:writing\s+)?exam\s+simulation\b/i.test(text)) {
         void launchWritingExam()
         return
       }
+      if (isReceptive) return
       const target = directWritaNavigationTarget(text)
       if (target) onNavigateWrita?.(target)
       return
@@ -1364,7 +1469,7 @@ export function SpeakiaAssistant({
       onReviewPerformanceTest(historyRequest.testId, historyRequest.action)
     }
     else onNavigate('Performance History')
-  }, [isWriting, launchPracticeAfterVoiceStops, launchWritingExam, onNavigate, onNavigateWrita, onReviewPerformanceTest, onStartGuidedPractice, onStartPractice, onStartWritingExam, results])
+  }, [isReceptive, isWriting, launchPracticeAfterVoiceStops, launchWritingExam, onNavigate, onNavigateWrita, onReviewPerformanceTest, onStartGuidedPractice, onStartPractice, onStartWritingExam, results])
   const handleLiveToolCall = useCallback(async (functionCalls: FunctionCall[]): Promise<FunctionResponse[]> => {
     const responses = await Promise.all(functionCalls.map(async (call) => {
       if (call.name === writiaNavigationTool.name) {
@@ -1487,7 +1592,7 @@ export function SpeakiaAssistant({
           return { id: call.id, name: call.name, response: { error: caughtError instanceof Error ? caughtError.message : 'The requested page control could not be activated.' } }
         }
       }
-      if (call.name === `end_${isWriting ? 'writia' : 'speakia'}_live_session`) {
+      if (call.name === `end_${liveEndName}_live_session`) {
         closeLiveSessionRef.current(false)
         return { id: call.id, name: call.name, response: { status: 'success', instruction: 'Complete a brief, warm goodbye if you have not already said one, then stop speaking without asking another question.' } }
       }
@@ -1507,7 +1612,7 @@ export function SpeakiaAssistant({
       if (call.name === adaptiveQuizTool.name) {
               if (call.name === audioLessonTool.name) {
                 try {
-                  const { lesson, audio } = await createAudioLesson(apiKey, call.args ?? {}, context, toolModel, coachLanguage, undefined, isWriting ? 'writing' : 'speaking')
+                  const { lesson, audio } = await createAudioLesson(apiKey, call.args ?? {}, context, toolModel, coachLanguage, undefined, assistantSkill)
                   await saveAudioLessonAudio(lesson.id, audio)
                   updateMessages((current) => [...current, {
                     ...createMessage('assistant', `Your audio lesson is ready: ${lesson.title}. Press play to listen, or open the transcript below.`),
@@ -1521,7 +1626,7 @@ export function SpeakiaAssistant({
                 }
               }
         try {
-          const quiz = createAdaptiveQuizFromContent(call.args ?? {}, isWriting ? 'writing' : 'speaking')
+          const quiz = createAdaptiveQuizFromContent(call.args ?? {}, assistantSkill)
           updateMessages((current) => [...current, {
             ...createMessage('assistant', `Your interactive quiz is ready: ${quiz.title}. Answer each question and check your results when you’re done.`),
             quiz,
@@ -1552,8 +1657,8 @@ export function SpeakiaAssistant({
       }
       try {
         const module = call.name === interactiveLessonTool.name
-          ? await createInteractiveLesson(apiKey, call.args ?? {}, context, toolModel, undefined, isWriting ? 'writing' : 'speaking')
-          : createLearningModuleFromContent(call.name === slidesTool.name ? 'slides' : 'flashcards', call.args ?? {}, isWriting ? 'writing' : 'speaking')
+          ? await createInteractiveLesson(apiKey, call.args ?? {}, context, toolModel, undefined, assistantSkill)
+          : createLearningModuleFromContent(call.name === slidesTool.name ? 'slides' : 'flashcards', call.args ?? {}, assistantSkill)
         if (isEmbeddedLearningModule(module)) {
           updateMessages((current) => [...current, {
             ...createMessage('assistant', `I’ve built ${module.kind === 'slides' ? 'an interactive slide deck' : 'interactive flashcards'} for you: ${module.title}.`),
@@ -1588,7 +1693,7 @@ export function SpeakiaAssistant({
     }))
     recordToolActivity(functionCalls, responses)
     return responses
-  }, [apiKey, coachLanguage, context, isWriting, launchPracticeAfterVoiceStops, launchWritingExam, onActivateControl, onAddLexicalEntry, onAddTopicPrompt, onNavigate, onNavigateWrita, onReviewPerformanceTest, onStartGuidedPractice, onStartPractice, onStartWritingExam, recordToolActivity, scheduleLiveSessionEnd, toolModel, updateMessages])
+  }, [apiKey, assistantSkill, coachLanguage, context, isWriting, launchPracticeAfterVoiceStops, launchWritingExam, liveEndName, onActivateControl, onAddLexicalEntry, onAddTopicPrompt, onNavigate, onNavigateWrita, onReviewPerformanceTest, onStartGuidedPractice, onStartPractice, onStartWritingExam, recordToolActivity, scheduleLiveSessionEnd, toolModel, updateMessages])
   const live = useGeminiLive({
     apiKey,
     systemInstruction: liveInstruction,
@@ -1597,7 +1702,7 @@ export function SpeakiaAssistant({
     tools: [{ functionDeclarations: [
       ...activeToolDeclarations,
       {
-        name: `end_${isWriting ? 'writia' : 'speakia'}_live_session`,
+        name: `end_${liveEndName}_live_session`,
         description: `End the live ${assistantName} voice session when the learner says they are finished, have what they need, want to leave, or otherwise signals they do not want to continue. This includes natural farewells even without saying “end” or “stop.” Do not call if they clearly say they want to continue or ask another question.`,
         parameters: { type: Type.OBJECT, properties: {} },
       },
@@ -1616,7 +1721,7 @@ export function SpeakiaAssistant({
             : `Start a live IELTS Speaking practice session using this card: ${coachFocus.context}. Briefly introduce yourself as Speakia Coach, then ask the first supplied question and wait for the learner's answer.`
         : messages.length > 1
         ? `Continue the learner’s existing conversation naturally as ${assistantName}. Briefly acknowledge the previous discussion and invite them to continue by voice.`
-        : `Greet the learner as their ${assistantName} in one short sentence, then invite them to ask a question or practise ${isWriting ? 'writing' : 'speaking'}.`,
+        : `Greet the learner as their ${assistantName} in one short sentence, then invite them to ask a question or practise IELTS ${assistantSkill}.`,
   })
   const {
     connected: liveConnected,
@@ -2183,10 +2288,12 @@ export function SpeakiaAssistant({
     setBusy(true)
     try {
       const client = new GoogleGenAI({ apiKey: apiKey.trim() })
-      const context = makeContext(isWriting ? 'Writia' : activeSection, results, lexicalEntries, profile, writingContext, loadMediaAssessments(), assignments, messagesRef.current)
-      const messageInstruction = isWriting
-        ? createWritingSystemInstruction(context, coachLanguage, persistentMemory, activeWritaModule)
-        : createSystemInstruction(context, coachLanguage, persistentMemory)
+      const context = makeContext(isWriting ? 'Writia' : activeSection, results, lexicalEntries, profile, writingContext, literacyContext, loadMediaAssessments(), assignments, messagesRef.current)
+      const messageInstruction = isReceptive
+        ? createLiteracySystemInstruction(context, platform, coachLanguage, persistentMemory)
+        : isWriting
+          ? createWritingSystemInstruction(context, coachLanguage, persistentMemory, activeWritaModule)
+          : createSystemInstruction(context, coachLanguage, persistentMemory)
       const recentMessages = nextMessages.slice(-12)
       const contents = recentMessages.map(({ role, text: contentText }, index) => ({
           role: role === 'assistant' ? 'model' : 'user',
@@ -2374,7 +2481,7 @@ export function SpeakiaAssistant({
           if (call.name === audioLessonTool.name) {
             if (index > 0) return { id: call.id, name: call.name, response: { error: 'Only one interactive tool may be generated per request.' } }
             try {
-              const generated = await createAudioLesson(apiKey, call.args ?? {}, context, toolModel, coachLanguage, requestController.signal, isWriting ? 'writing' : 'speaking')
+              const generated = await createAudioLesson(apiKey, call.args ?? {}, context, toolModel, coachLanguage, requestController.signal, assistantSkill)
               if (requestController.signal.aborted) throw new DOMException('The request was stopped.', 'AbortError')
               await saveAudioLessonAudio(generated.lesson.id, generated.audio)
               generatedAudioLesson = generated.lesson
@@ -2388,7 +2495,7 @@ export function SpeakiaAssistant({
           if (call.name === adaptiveQuizTool.name) {
             if (index > 0) return { id: call.id, name: call.name, response: { error: 'Only one interactive tool may be generated per request.' } }
             try {
-              generatedQuiz = await createAdaptiveQuiz(apiKey, call.args ?? {}, context, toolModel, requestController.signal, isWriting ? 'writing' : 'speaking')
+              generatedQuiz = await createAdaptiveQuiz(apiKey, call.args ?? {}, context, toolModel, requestController.signal, assistantSkill)
               return { id: call.id, name: call.name, response: { status: 'success', title: generatedQuiz.title, topic: generatedQuiz.topic, questionCount: generatedQuiz.questions.length } }
             } catch (caughtError) {
               console.error('Unable to create an adaptive quiz from text chat.', caughtError)
@@ -2413,8 +2520,8 @@ export function SpeakiaAssistant({
           if (index > 0) return { id: call.id, name: call.name, response: { error: 'Only one interactive module may be generated per request.' } }
           try {
             generatedModule = call.name === interactiveLessonTool.name
-              ? await createInteractiveLesson(apiKey, call.args ?? {}, context, toolModel, requestController.signal, isWriting ? 'writing' : 'speaking')
-              : await createLearningModule(apiKey, call.name === slidesTool.name ? 'slides' : 'flashcards', call.args ?? {}, context, toolModel, requestController.signal, isWriting ? 'writing' : 'speaking')
+              ? await createInteractiveLesson(apiKey, call.args ?? {}, context, toolModel, requestController.signal, assistantSkill)
+              : await createLearningModule(apiKey, call.name === slidesTool.name ? 'slides' : 'flashcards', call.args ?? {}, context, toolModel, requestController.signal, assistantSkill)
             return {
               id: call.id,
               name: call.name,
@@ -2712,7 +2819,7 @@ export function SpeakiaAssistant({
           >
             <header className="assistant-header">
               <span className="assistant-avatar"><AudioLines size={19} /></span>
-              <div className="assistant-header-copy"><strong>{assistantBrand}</strong><span><i /> {isWriting ? 'Your Personal IELTS Writing Coach' : 'Your Personal IELTS Speaking Coach'}</span><small className="assistant-session-title">{activeConversation.title}</small>{live.connected && <small className="assistant-live-header-status">Live voice conversation</small>}</div>
+              <div className="assistant-header-copy"><strong>{assistantBrand}</strong><span><i /> Your Personal IELTS {assistantSkill[0].toLocaleUpperCase() + assistantSkill.slice(1)} Coach</span><small className="assistant-session-title">{activeConversation.title}</small>{live.connected && <small className="assistant-live-header-status">Live voice conversation</small>}</div>
               <button className="assistant-header-action assistant-new-chat" aria-label="Start a new conversation" title="New conversation" onClick={startNewConversation} disabled={busy || audioShareBusy || pendingAudioShare !== null || live.connected || live.connecting}><Plus size={18} /></button>
               <button className={`assistant-header-action assistant-session-history ${showConversationHistory ? 'assistant-session-history-active' : ''}`} aria-label="Browse past conversations" title="Conversation history" onClick={() => setShowConversationHistory((open) => !open)} disabled={busy || audioShareBusy || pendingAudioShare !== null || live.connected || live.connecting}><History size={17} /></button>
               <button className="assistant-header-action assistant-minimize" aria-label={`Minimize ${assistantName}`} title="Minimize coach and continue voice chat" onClick={() => { setIsExpanded(false); setIsMinimized(true) }}><ChevronDown size={18} /></button>
@@ -2721,7 +2828,7 @@ export function SpeakiaAssistant({
             </header>
 
             {showConversationHistory && <section className="assistant-session-history-panel" aria-label="Conversation history">
-              <div className="assistant-session-history-heading"><div><strong>Conversation history</strong><small>Past chats and tool actions help Speakia remember context across conversations.</small></div><button type="button" aria-label="Close conversation history" onClick={() => setShowConversationHistory(false)}><X size={15} /></button></div>
+              <div className="assistant-session-history-heading"><div><strong>Conversation history</strong><small>Past chats and tool actions help {assistantName} remember context across conversations.</small></div><button type="button" aria-label="Close conversation history" onClick={() => setShowConversationHistory(false)}><X size={15} /></button></div>
               <div className="assistant-session-list">
                 {[...conversationStore.conversations].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)).map((conversation) => (
                   <button type="button" className={`assistant-session-item ${conversation.id === activeConversationId ? 'assistant-session-item-active' : ''}`} key={conversation.id} onClick={() => openConversation(conversation.id)} disabled={busy || audioShareBusy || pendingAudioShare !== null || live.connected || live.connecting}>
@@ -2740,7 +2847,7 @@ export function SpeakiaAssistant({
                 const model = ASSISTANT_MODELS.find((item) => item.id === event.target.value)
                 if (model) onChatModelChange(model.id)
               }}>{ASSISTANT_MODELS.map((model) => <option key={model.id} value={model.id}>{model.label} · {model.description}</option>)}</select></label>
-              <label><span>LIVE VOICE</span><select aria-label="Speakia coach live voice" value={liveVoice} disabled={live.connected || live.connecting} onChange={(event) => changeLiveVoice(event.target.value)}>{GEMINI_LIVE_VOICES.map((voice) => <option key={voice.id} value={voice.id}>{voice.label}</option>)}</select></label>
+              <label><span>LIVE VOICE</span><select aria-label={`${assistantName} live voice`} value={liveVoice} disabled={live.connected || live.connecting} onChange={(event) => changeLiveVoice(event.target.value)}>{GEMINI_LIVE_VOICES.map((voice) => <option key={voice.id} value={voice.id}>{voice.label}</option>)}</select></label>
               <label><span>FOLLOW-UPS</span><select aria-label="Enable suggested follow-up questions" value={followUpsEnabled ? 'on' : 'off'} onChange={(event) => setFollowUpsPreference(event.target.value === 'on')}><option value="on">On</option><option value="off">Off</option></select></label>
               <small className={usesExtendedThinking && (live.connected || live.connecting) ? 'assistant-thinking-active' : ''} role="status">{usesExtendedThinking && (live.connected || live.connecting) && <Sparkles size={13} />}{usesExtendedThinking
                 ? live.connected || live.connecting
@@ -2751,17 +2858,27 @@ export function SpeakiaAssistant({
                   : 'Extended reasoning activates for shadowing, nuanced vocabulary, and reverse translation.'}</small>
             </div>
             <div className="assistant-tool-row" aria-label={`Create an interactive ${assistantBrand} learning tool`}>
-              <span>{isWriting ? '8 INLINE TOOLS' : '9 INLINE TOOLS'}</span>
-              <button type="button" onClick={() => void sendMessage(`Create an interactive IELTS ${isWriting ? 'Writing' : 'Speaking'} lesson about a useful topic for my next practice.`)} disabled={busy}><Sparkles size={14} />{isWriting ? ' Writing lesson' : ' Lesson'}</button>
-              <button type="button" onClick={() => void sendMessage(`Create IELTS ${isWriting ? 'Writing' : 'Speaking'} flashcards about useful vocabulary and strategies.`)} disabled={busy}><Layers3 size={14} />{isWriting ? ' Writing cards' : ' Flashcards'}</button>
-              <button type="button" onClick={() => void sendMessage(`Create an interactive IELTS ${isWriting ? 'Writing' : 'Speaking'} slide deck with a short step-by-step lesson.`)} disabled={busy}><Presentation size={14} />{isWriting ? ' Writing slides' : ' Slides'}</button>
-              {!isWriting && <button type="button" onClick={() => void sendMessage('Create a tailored, visually polished IELTS Speaking infographic that explains the most useful ideas for my current practice.')} disabled={busy}><BarChart3 size={14} /> Infographic</button>}
-              <button type="button" onClick={() => void sendMessage(`Create an adaptive interactive quiz to check my IELTS ${isWriting ? 'Writing' : 'Speaking'} knowledge and skills.`)} disabled={busy}><ClipboardCheck size={14} />{isWriting ? ' Writing quiz' : ' Quiz'}</button>
-              <button type="button" onClick={() => void sendMessage(`Create a spoken IELTS ${isWriting ? 'Writing' : 'Speaking'} audio lesson about a useful topic for my next practice.`)} disabled={busy}><Headphones size={14} />{isWriting ? ' Writing audio' : ' Audio lesson'}</button>
+              <span>{isReceptive ? '5 INLINE TOOLS' : isWriting ? '8 INLINE TOOLS' : '9 INLINE TOOLS'}</span>
+              {isReceptive
+                ? <>
+                  <button type="button" onClick={() => void sendMessage(`Build an interactive IELTS ${assistantSkill} practice lesson using the current source material and questions when available.`)} disabled={busy}><Sparkles size={14} /> Lesson</button>
+                  <button type="button" onClick={() => void sendMessage(`Create IELTS ${assistantSkill} flashcards about the current material, paraphrases, and useful strategies.`)} disabled={busy}><Layers3 size={14} /> Flashcards</button>
+                  <button type="button" onClick={() => void sendMessage(`Create an interactive IELTS ${assistantSkill} slide deck teaching one strategy with short practice.`)} disabled={busy}><Presentation size={14} /> Slides</button>
+                  <button type="button" onClick={() => void sendMessage(`Create an adaptive IELTS ${assistantSkill} quiz grounded in the current source material when available.`)} disabled={busy}><ClipboardCheck size={14} /> Quiz</button>
+                  <button type="button" onClick={() => void sendMessage(`Create a spoken IELTS ${assistantSkill} audio lesson about a useful test strategy.`)} disabled={busy}><Headphones size={14} /> Audio lesson</button>
+                </>
+                : <>
+                  <button type="button" onClick={() => void sendMessage(`Create an interactive IELTS ${isWriting ? 'Writing' : 'Speaking'} lesson about a useful topic for my next practice.`)} disabled={busy}><Sparkles size={14} />{isWriting ? ' Writing lesson' : ' Lesson'}</button>
+                  <button type="button" onClick={() => void sendMessage(`Create IELTS ${isWriting ? 'Writing' : 'Speaking'} flashcards about useful vocabulary and strategies.`)} disabled={busy}><Layers3 size={14} />{isWriting ? ' Writing cards' : ' Flashcards'}</button>
+                  <button type="button" onClick={() => void sendMessage(`Create an interactive IELTS ${isWriting ? 'Writing' : 'Speaking'} slide deck with a short step-by-step lesson.`)} disabled={busy}><Presentation size={14} />{isWriting ? ' Writing slides' : ' Slides'}</button>
+                  {!isWriting && <button type="button" onClick={() => void sendMessage('Create a tailored, visually polished IELTS Speaking infographic that explains the most useful ideas for my current practice.')} disabled={busy}><BarChart3 size={14} /> Infographic</button>}
+                  <button type="button" onClick={() => void sendMessage(`Create an adaptive interactive quiz to check my IELTS ${isWriting ? 'Writing' : 'Speaking'} knowledge and skills.`)} disabled={busy}><ClipboardCheck size={14} />{isWriting ? ' Writing quiz' : ' Quiz'}</button>
+                  <button type="button" onClick={() => void sendMessage(`Create a spoken IELTS ${isWriting ? 'Writing' : 'Speaking'} audio lesson about a useful topic for my next practice.`)} disabled={busy}><Headphones size={14} />{isWriting ? ' Writing audio' : ' Audio lesson'}</button>
+                </>}
               {isWriting
                 ? <><button type="button" onClick={() => void launchWritingExam()} disabled={busy || live.connecting}><PenLine size={14} /> Writing Test</button><button type="button" onClick={() => onNavigateWrita?.('drills')} disabled={busy}><PenLine size={14} /> Writing Drills</button></>
-                : <><button type="button" onClick={() => void sendMessage('Open the Speaking Drills page.')} disabled={busy}><AudioLines size={14} /> Speaking Drills</button><button type="button" onClick={startSpeechShadowing} disabled={busy || live.connecting}><AudioLines size={14} /> Shadowing</button></>}
-              <button type="button" onClick={() => launchTranslator('urdu-to-english')} disabled={busy}><Languages size={14} /> Pakistani Urdu translator</button>
+                : !isReceptive && <><button type="button" onClick={() => void sendMessage('Open the Speaking Drills page.')} disabled={busy}><AudioLines size={14} /> Speaking Drills</button><button type="button" onClick={startSpeechShadowing} disabled={busy || live.connecting}><AudioLines size={14} /> Shadowing</button></>}
+              {!isReceptive && <button type="button" onClick={() => launchTranslator('urdu-to-english')} disabled={busy}><Languages size={14} /> Pakistani Urdu translator</button>}
             </div>
 
             <div className="assistant-messages" ref={scrollRef} aria-live="polite">
@@ -2809,7 +2926,7 @@ export function SpeakiaAssistant({
               )}
               {busy && <div className="assistant-thinking" role="status" aria-live="polite"><LoaderCircle size={15} className="assistant-spin" /> {assistantName} is responding…</div>}
               {activeSection === 'Assignments' && <button className="assistant-assign-action" onClick={() => void chooseAssignment()} disabled={assignmentBusy || live.connecting || live.connected}><ClipboardCheck size={15} />{assignmentBusy ? 'Choosing tomorrow’s activity…' : 'Choose tomorrow’s assignment'}<ArrowUp size={13} /></button>}
-              {messages.length === 1 && !live.connected && <div className="assistant-quick-prompts">{(isWriting ? writingQuickPrompts : quickPrompts).map((prompt) => <button key={prompt} onClick={() => void sendMessage(prompt)}>{prompt}<ArrowUp size={12} /></button>)}</div>}
+              {messages.length === 1 && !live.connected && <div className="assistant-quick-prompts">{(isWriting ? writingQuickPrompts : platform === 'reading' ? readingQuickPrompts : platform === 'listening' ? listeningQuickPrompts : quickPrompts).map((prompt) => <button key={prompt} onClick={() => void sendMessage(prompt)}>{prompt}<ArrowUp size={12} /></button>)}</div>}
             </div>
             <div className="assistant-composer-wrap">
               {pendingWritingImage && <div className="assistant-writing-image-preview">
@@ -2850,7 +2967,7 @@ export function SpeakiaAssistant({
         {live.connected && <><button type="button" className={`assistant-dock-mute ${live.micMuted ? 'assistant-dock-mute-active' : ''}`} aria-label={live.micMuted ? `Unmute ${assistantName} microphone` : `Mute ${assistantName} microphone`} aria-pressed={live.micMuted} title={live.micMuted ? 'Unmute microphone' : 'Mute microphone'} onClick={live.toggleMicMuted}>{live.micMuted ? <MicOff size={16} /> : <Mic size={16} />}</button><button type="button" className="assistant-dock-end" aria-label={`End live voice chat with ${assistantName}`} title="End live voice chat" onClick={() => void stopVoice()}><X size={16} /></button></>}
       </div>}
       {!isMinimized && !isOpen && <button className="assistant-fab" aria-label={`Open ${assistantName}`} aria-expanded={isOpen} onClick={() => { refreshContext(); setIsOpen(true) }} disabled={live.connecting}>
-        <MessageCircle size={20} /><span>{isWriting ? 'Ask Writia' : 'Ask Speakia'}</span><i />
+        <MessageCircle size={20} /><span>Ask {assistantBrand}</span><i />
       </button>}
     </div>
   )
